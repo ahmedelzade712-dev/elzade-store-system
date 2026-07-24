@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { getCurrentUserProfile } from "@/lib/auth";
+import QrScannerModal from "@/app/components/QrScannerModal";
 
 function money(value: number) {
   return `${Number(value || 0).toLocaleString("en-US", {
@@ -50,6 +51,7 @@ export default function OrderSearchPage() {
   const [selectedOrderId, setSelectedOrderId] = useState("");
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
+  const [scannerOpen, setScannerOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -68,10 +70,8 @@ export default function OrderSearchPage() {
     loadProfile();
   }, []);
 
-  async function searchOrders(event?: FormEvent) {
-    event?.preventDefault();
-
-    const value = query.trim().toLowerCase();
+  async function runSearch(rawValue: string) {
+    const value = rawValue.trim().toLowerCase();
 
     if (!value) {
       setMessage("أدخل كود الطلب أو كود المعيار أو رقم الهاتف");
@@ -108,6 +108,17 @@ export default function OrderSearchPage() {
     } finally {
       setLoading(false);
     }
+  }
+
+  async function searchOrders(event?: FormEvent) {
+    event?.preventDefault();
+    await runSearch(query);
+  }
+
+  function handleQrScan(scannedValue: string) {
+    setScannerOpen(false);
+    setQuery(scannedValue);
+    void runSearch(scannedValue);
   }
 
   function resetSearch() {
@@ -167,7 +178,7 @@ export default function OrderSearchPage() {
         onSubmit={searchOrders}
         className="mb-6 rounded-2xl border border-neutral-800 bg-neutral-900 p-5"
       >
-        <div className="grid gap-3 md:grid-cols-[1fr_auto_auto]">
+        <div className="grid gap-3 md:grid-cols-[1fr_auto_auto_auto]">
           <input
             ref={inputRef}
             dir="ltr"
@@ -183,6 +194,14 @@ export default function OrderSearchPage() {
             className="rounded-xl bg-green-500 px-6 py-4 font-bold text-black disabled:opacity-50"
           >
             {loading ? "جاري البحث..." : "بحث"}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setScannerOpen(true)}
+            className="rounded-xl bg-blue-600 px-6 py-4 font-bold"
+          >
+            فتح الكاميرا وقراءة QR
           </button>
 
           <button
@@ -424,6 +443,12 @@ export default function OrderSearchPage() {
           </section>
         )}
       </div>
+      <QrScannerModal
+        open={scannerOpen}
+        onClose={() => setScannerOpen(false)}
+        onScan={handleQrScan}
+        title="قراءة QR والبحث عن الطلب"
+      />
     </main>
   );
 }
