@@ -237,6 +237,36 @@ export async function mayarListShippingServices(token: string) {
   return data.listShippingServicesDropdown || [];
 }
 
+export async function mayarListShipmentTypes(
+  token: string
+): Promise<MayarDropdownEntry[]> {
+  const query = `
+    query ListShipmentTypes($serviceId: Int, $mobileActive: Boolean) {
+      listShipmentTypesDropdown(
+        serviceId: $serviceId
+        mobileActive: $mobileActive
+      ) {
+        id
+        code
+        name
+      }
+    }
+  `;
+
+  const data = await mayarGraphql<{
+    listShipmentTypesDropdown: MayarDropdownEntry[];
+  }>(
+    query,
+    {
+      serviceId: MAYAR_SERVICE_ID,
+      mobileActive: true,
+    },
+    token
+  );
+
+  return data.listShipmentTypesDropdown || [];
+}
+
 export async function mayarSaveShipment(
   token: string,
   shipmentInput: MayarShipmentInput
@@ -254,6 +284,13 @@ export async function mayarSaveShipment(
         price
         deliveryFees
         totalAmount
+        piecesCount
+        returnPiecesCount
+        type {
+          id
+          code
+          name
+        }
         recipientZone {
           id
           name
@@ -274,7 +311,7 @@ export async function mayarSaveShipment(
     1
   );
 
-  const positiveReturnPiecesCount = toPositiveInteger(
+  const returnPiecesCount = toPositiveInteger(
     shipmentInput.returnPiecesCount,
     1
   );
@@ -296,9 +333,11 @@ export async function mayarSaveShipment(
     recipientSubzoneId:
       Number(shipmentInput.recipientSubzoneId),
 
-    // PDP هو النوع الذي أعاد خادم المعيار معه شرط أن يكون
-    // returnPiecesCount أصغر من أو يساوي -1.
-    typeCode: isExchange ? "PDP" : "FDP",
+    /*
+     * FDP = تسليم كامل الطرد.
+     * PTP = طرد مقابل طرد، وهو نوع شحنة الاستبدال.
+     */
+    typeCode: isExchange ? "PTP" : "FDP",
 
     openableCode:
       shipmentInput.openable === false ? "N" : "Y",
@@ -313,13 +352,11 @@ export async function mayarSaveShipment(
   };
 
   /*
-   * في شحنة PDP، خادم المعيار يعتبر القطع الراجعة حركة عكسية،
-   * ولذلك يطلب العدد بالسالب. مثال: قطعتان راجعتان = -2.
-   *
-   * لا نرسل الحقل أصلًا في الشحنة العادية FDP.
+   * في طرد مقابل طرد PTP يجب إرسال عدد القطع المسترجعة
+   * كعدد صحيح موجب يساوي 1 أو أكثر.
    */
   if (isExchange) {
-    input.returnPiecesCount = -positiveReturnPiecesCount;
+    input.returnPiecesCount = returnPiecesCount;
   }
 
   const data = await mayarGraphql<{
@@ -334,6 +371,13 @@ export async function mayarSaveShipment(
       price: number;
       deliveryFees: number;
       totalAmount: number;
+      piecesCount: number | null;
+      returnPiecesCount: number | null;
+      type: {
+        id: number;
+        code: string;
+        name: string;
+      } | null;
       recipientZone: {
         id: number;
         name: string;

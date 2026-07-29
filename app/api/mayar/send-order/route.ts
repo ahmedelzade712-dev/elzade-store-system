@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
-import { mayarLogin, mayarSaveShipment } from "@/lib/mayar";
+import {
+  mayarListShipmentTypes,
+  mayarLogin,
+  mayarSaveShipment,
+} from "@/lib/mayar";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 type ExchangeReturnItemRow = {
@@ -8,7 +12,12 @@ type ExchangeReturnItemRow = {
 
 function getFirst(obj: any, keys: string[], fallback: any = null) {
   for (const key of keys) {
-    if (obj && obj[key] !== undefined && obj[key] !== null && obj[key] !== "") {
+    if (
+      obj &&
+      obj[key] !== undefined &&
+      obj[key] !== null &&
+      obj[key] !== ""
+    ) {
       return obj[key];
     }
   }
@@ -30,7 +39,10 @@ function toPositiveInteger(value: unknown, fallback = 1) {
   return Math.max(1, Math.trunc(parsed));
 }
 
-async function saveMayarFailure(orderId: string | null, errorMessage: string) {
+async function saveMayarFailure(
+  orderId: string | null,
+  errorMessage: string
+) {
   if (!orderId) return;
 
   await supabaseAdmin
@@ -47,6 +59,22 @@ export async function GET(request: Request) {
 
   try {
     const { searchParams } = new URL(request.url);
+
+    /*
+     * رابط فحص آمن لا ينشئ شحنة ولا يخصم مخزونًا:
+     * /api/mayar/send-order?shipment-types=1
+     */
+    if (searchParams.get("shipment-types") === "1") {
+      const login = await mayarLogin();
+      const shipmentTypes = await mayarListShipmentTypes(login.token);
+
+      return NextResponse.json({
+        ok: true,
+        service_id: Number(process.env.MAYAR_SERVICE_ID || 1),
+        shipment_types: shipmentTypes,
+      });
+    }
+
     const orderCode = searchParams.get("code")?.trim();
 
     if (!orderCode) {
@@ -85,11 +113,14 @@ export async function GET(request: Request) {
         message: "هذه الطلبية مرسلة للمعيار سابقًا",
         order_code: order.order_code,
         mayar_status: order.mayar_status || "sent",
-        mayar_shipment_id: order.mayar_shipment_id || order.mayar_id || null,
+        mayar_shipment_id:
+          order.mayar_shipment_id || order.mayar_id || null,
         mayar_shipment_code:
           order.mayar_shipment_code || order.mayar_code || null,
         mayar_tracking_url:
-          order.mayar_tracking_url || order.mayar_tracking || null,
+          order.mayar_tracking_url ||
+          order.mayar_tracking ||
+          null,
       });
     }
 
@@ -119,44 +150,76 @@ export async function GET(request: Request) {
     }
 
     if (city.name === "طرابلس (خاصة)") {
-      throw new Error("طرابلس (خاصة) لا ترسل إلى شركة المعيار");
+      throw new Error(
+        "طرابلس (خاصة) لا ترسل إلى شركة المعيار"
+      );
     }
 
     if (!city.mayar_zone_id) {
-      throw new Error(`المدينة ${city.name || ""} غير مربوطة مع المعيار`);
+      throw new Error(
+        `المدينة ${city.name || ""} غير مربوطة مع المعيار`
+      );
     }
 
     if (!area.mayar_subzone_id) {
-      throw new Error(`المنطقة ${area.name || ""} غير مربوطة مع المعيار`);
+      throw new Error(
+        `المنطقة ${area.name || ""} غير مربوطة مع المعيار`
+      );
     }
 
     const customerName = String(
-      getFirst(customer, ["name", "customer_name", "full_name"], "بدون اسم")
+      getFirst(
+        customer,
+        ["name", "customer_name", "full_name"],
+        "بدون اسم"
+      )
     );
 
     const phone = getPhone(
-      getFirst(customer, ["phone", "phone_number", "mobile", "customer_phone"], "")
+      getFirst(
+        customer,
+        ["phone", "phone_number", "mobile", "customer_phone"],
+        ""
+      )
     );
 
     const secondPhone = getPhone(
-      getFirst(customer, ["second_phone", "phone2", "second_mobile"], phone)
+      getFirst(
+        customer,
+        ["second_phone", "phone2", "second_mobile"],
+        phone
+      )
     );
 
     const address = String(
-      getFirst(customer, ["address", "full_address", "customer_address"], "-")
+      getFirst(
+        customer,
+        ["address", "full_address", "customer_address"],
+        "-"
+      )
     );
 
     const totalAmount = Number(
-      getFirst(order, ["total_amount", "total", "amount", "order_total"], 0)
+      getFirst(
+        order,
+        ["total_amount", "total", "amount", "order_total"],
+        0
+      )
     );
 
-    const notes = String(getFirst(order, ["notes", "note"], ""));
+    const notes = String(
+      getFirst(order, ["notes", "note"], "")
+    );
 
     if (!phone) {
-      throw new Error("رقم الهاتف غير موجود في بيانات العميل");
+      throw new Error(
+        "رقم الهاتف غير موجود في بيانات العميل"
+      );
     }
 
-    const parcelType = String(order.mayar_parcel_type || "full_delivery");
+    const parcelType = String(
+      order.mayar_parcel_type || "full_delivery"
+    );
     const isExchange = parcelType === "exchange";
 
     const sentPiecesCount = toPositiveInteger(
@@ -164,10 +227,13 @@ export async function GET(request: Request) {
       1
     );
 
-    let returnPiecesCount = 1;
+    let returnPiecesCount = 0;
 
     if (isExchange) {
-      const { data: returnRows, error: returnRowsError } = await supabaseAdmin
+      const {
+        data: returnRows,
+        error: returnRowsError,
+      } = await supabaseAdmin
         .from("order_exchange_return_items")
         .select("quantity")
         .eq("exchange_order_id", order.id);
@@ -182,7 +248,8 @@ export async function GET(request: Request) {
       const registeredReturnCount = (
         (returnRows || []) as ExchangeReturnItemRow[]
       ).reduce(
-        (sum, row) => sum + toPositiveInteger(row.quantity, 1),
+        (sum, row) =>
+          sum + toPositiveInteger(row.quantity, 1),
         0
       );
 
@@ -192,8 +259,8 @@ export async function GET(request: Request) {
       );
 
       /*
-       * نعتمد أولًا على القطع المسجلة فعليًا في جدول الاستبدال.
-       * إذا لم توجد لأي سبب، نستخدم العدد المحفوظ داخل الطلب.
+       * نعتمد أولًا على القطع المسجلة في جدول الاستبدال.
+       * إذا لم توجد، نستخدم العدد المحفوظ داخل الطلب.
        */
       returnPiecesCount =
         registeredReturnCount > 0
@@ -201,40 +268,53 @@ export async function GET(request: Request) {
           : storedReturnCount;
 
       /*
-       * API المعيار الخاص بطرد مقابل طرد يرفض returnPiecesCount إذا كان 1.
-       * لذلك يجب أن يكون عدد القطع الراجعة 2 أو أكثر.
+       * المعيار يقبل في PTP عددًا موجبًا يبدأ من 1.
        */
-      if (returnPiecesCount < 2) {
+      if (returnPiecesCount < 1) {
         throw new Error(
-          `طلب الاستبدال مسجل بعدد قطع راجعة ${returnPiecesCount}. يجب أن يكون عدد القطع المسترجعة من الزبون 2 أو أكثر قبل الإرسال إلى المعيار.`
+          "يجب أن يكون عدد القطع المسترجعة في طلب الاستبدال 1 أو أكثر."
         );
       }
     }
 
     const openable =
-      order.mayar_openable === undefined || order.mayar_openable === null
+      order.mayar_openable === undefined ||
+      order.mayar_openable === null
         ? true
         : Boolean(order.mayar_openable);
 
     const login = await mayarLogin();
 
-    const shipment = await mayarSaveShipment(login.token, {
-      refNumber: order.order_code,
-      recipientName: customerName || "بدون اسم",
-      recipientPhone: phone,
-      recipientMobile: secondPhone || phone,
-      recipientAddress: address || "-",
-      recipientZoneId: Number(city.mayar_zone_id),
-      recipientSubzoneId: Number(area.mayar_subzone_id),
-      price: totalAmount,
-      parcelType: isExchange ? "exchange" : "full_delivery",
-      piecesCount: sentPiecesCount,
-      returnPiecesCount: isExchange ? returnPiecesCount : 1,
-      openable,
-      notes: `Elzade ${order.order_code}${
-        isExchange ? " - طرد مقابل طرد" : ""
-      }${notes ? " - " + notes : ""}`,
-    });
+    const shipment = await mayarSaveShipment(
+      login.token,
+      {
+        refNumber: order.order_code,
+        recipientName:
+          customerName || "بدون اسم",
+        recipientPhone: phone,
+        recipientMobile:
+          secondPhone || phone,
+        recipientAddress: address || "-",
+        recipientZoneId: Number(
+          city.mayar_zone_id
+        ),
+        recipientSubzoneId: Number(
+          area.mayar_subzone_id
+        ),
+        price: totalAmount,
+        parcelType: isExchange
+          ? "exchange"
+          : "full_delivery",
+        piecesCount: sentPiecesCount,
+        returnPiecesCount: isExchange
+          ? returnPiecesCount
+          : undefined,
+        openable,
+        notes: `Elzade ${order.order_code}${
+          isExchange ? " - طرد مقابل طرد" : ""
+        }${notes ? " - " + notes : ""}`,
+      }
+    );
 
     const updatePayload: Record<string, any> = {
       mayar_status: "sent",
@@ -243,15 +323,18 @@ export async function GET(request: Request) {
     };
 
     if ("mayar_shipment_id" in order) {
-      updatePayload.mayar_shipment_id = shipment.id;
+      updatePayload.mayar_shipment_id =
+        shipment.id;
     }
 
     if ("mayar_shipment_code" in order) {
-      updatePayload.mayar_shipment_code = shipment.code;
+      updatePayload.mayar_shipment_code =
+        shipment.code;
     }
 
     if ("mayar_tracking_url" in order) {
-      updatePayload.mayar_tracking_url = shipment.trackingUrl;
+      updatePayload.mayar_tracking_url =
+        shipment.trackingUrl;
     }
 
     if ("mayar_id" in order) {
@@ -259,17 +342,20 @@ export async function GET(request: Request) {
     }
 
     if ("mayar_code" in order) {
-      updatePayload.mayar_code = shipment.code;
+      updatePayload.mayar_code =
+        shipment.code;
     }
 
     if ("mayar_tracking" in order) {
-      updatePayload.mayar_tracking = shipment.trackingUrl;
+      updatePayload.mayar_tracking =
+        shipment.trackingUrl;
     }
 
-    const { error: updateError } = await supabaseAdmin
-      .from("orders")
-      .update(updatePayload)
-      .eq("id", order.id);
+    const { error: updateError } =
+      await supabaseAdmin
+        .from("orders")
+        .update(updatePayload)
+        .eq("id", order.id);
 
     if (updateError) {
       throw new Error(
@@ -280,25 +366,39 @@ export async function GET(request: Request) {
 
     return NextResponse.json({
       ok: true,
-      message: "تم إنشاء الشحنة في المعيار وحفظ بياناتها داخل الطلب",
+      message:
+        "تم إنشاء الشحنة في المعيار وحفظ بياناتها داخل الطلب",
       order_code: order.order_code,
       mayar_status: "sent",
       customer: customerName,
       phone,
       city: city.name,
       area: area.name,
-      parcel_type: isExchange ? "طرد مقابل طرد" : "تسليم كامل الطرد",
-      openable: openable ? "مسموح بفتح الطرد" : "غير مسموح بفتح الطرد",
+      parcel_type: isExchange
+        ? "طرد مقابل طرد"
+        : "تسليم كامل الطرد",
+      openable: openable
+        ? "مسموح بفتح الطرد"
+        : "غير مسموح بفتح الطرد",
       sent_pieces_count: sentPiecesCount,
-      return_pieces_count: isExchange ? returnPiecesCount : 0,
-      mayar_price_sent: isExchange ? 0 : totalAmount,
+      return_pieces_count: isExchange
+        ? returnPiecesCount
+        : 0,
+      mayar_price_sent: isExchange
+        ? 0
+        : totalAmount,
       system_total_amount: totalAmount,
       shipment,
     });
   } catch (error: any) {
-    const errorMessage = error?.message || "Unknown send order error";
+    const errorMessage =
+      error?.message ||
+      "Unknown send order error";
 
-    await saveMayarFailure(loadedOrderId, errorMessage);
+    await saveMayarFailure(
+      loadedOrderId,
+      errorMessage
+    );
 
     return NextResponse.json(
       {
