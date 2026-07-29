@@ -365,11 +365,7 @@ export default function NewOrderPage() {
     if (normalized.includes("aban")) return "B";
     if (normalized.includes("diana")) return "D";
 
-    if (!mounted) {
-    return null;
-  }
-
-  return (storeName || "X").trim().charAt(0).toUpperCase() || "X";
+    return (storeName || "X").trim().charAt(0).toUpperCase() || "X";
   }
 
   useEffect(() => {
@@ -604,30 +600,6 @@ export default function NewOrderPage() {
       return;
     }
 
-    const { data: duplicateOrders, error: duplicateError } = await supabase
-      .from("orders")
-      .select(`
-        id,
-        order_code,
-        status,
-        customers!inner(phone)
-      `)
-      .eq("customers.phone", cleanPhone)
-      .eq("status", "new")
-      .limit(1);
-
-    if (duplicateError) {
-      setMessage("خطأ في فحص الرقم المكرر: " + duplicateError.message);
-      return;
-    }
-
-    if (duplicateOrders && duplicateOrders.length > 0) {
-      setMessage(
-        `هذا الرقم لديه طلب جديد سابق: ${duplicateOrders[0].order_code}. راجع صفحة الطلبات قبل إضافة طلب آخر.`
-      );
-      return;
-    }
-
     if (isScheduled && !scheduledFor) {
       setMessage("اختر تاريخ تجهيز الطلب المؤجل");
       return;
@@ -669,29 +641,27 @@ export default function NewOrderPage() {
         return;
       }
 
-      if (!mayarSentPiecesCount || mayarSentPiecesCount < 1) {
-        setMessage("عدد القطع المرسلة يجب أن يكون 1 أو أكثر");
-        return;
-      }
+      const sentQuantity = cart.reduce(
+        (sum, item) => sum + Number(item.quantity || 0),
+        0
+      );
 
-      if (
-        mayarParcelType === "exchange" &&
-        (!mayarReturnPiecesCount || mayarReturnPiecesCount < 1)
-      ) {
-        setMessage("في طرد مقابل طرد يجب إدخال عدد القطع المسترجعة");
+      if (sentQuantity !== Number(mayarSentPiecesCount || 0)) {
+        setMessage(
+          `عدد القطع الموجودة في الطلب (${sentQuantity}) يجب أن يساوي عدد القطع المرسلة للمعيار (${mayarSentPiecesCount})`
+        );
         return;
       }
 
       if (mayarParcelType === "exchange") {
         if (!exchangeOriginalOrder) {
-          setMessage("ابحث عن الطلب الأصلي واختر القطعة المستبدلة أولاً");
+          setMessage("ابحث عن الطلب الأصلي واختر القطع المستبدلة أولاً");
           return;
         }
 
-        const selectedReturnQuantity = Object.values(exchangeReturnSelections).reduce(
-          (sum, value) => sum + Number(value || 0),
-          0
-        );
+        const selectedReturnQuantity = Object.values(
+          exchangeReturnSelections
+        ).reduce((sum, value) => sum + Number(value || 0), 0);
 
         if (selectedReturnQuantity < 1) {
           setMessage("اختر قطعة واحدة على الأقل ستعود من الطلب الأصلي");
@@ -707,288 +677,147 @@ export default function NewOrderPage() {
       }
     }
 
-    for (const item of cart) {
-      const { data: currentVariant, error: currentVariantError } = await supabase
-        .from("product_variants")
-        .select("stock_quantity")
-        .eq("id", item.variant_id)
-        .single();
-
-      if (currentVariantError) {
-        setMessage("خطأ في مراجعة المخزون: " + currentVariantError.message);
-        return;
-      }
-
-      if (Number(currentVariant.stock_quantity || 0) < Number(item.quantity || 0)) {
-        setMessage(
-          `الكمية غير كافية للمنتج ${item.product_name} / ${item.color} / ${item.size}. المتوفر الآن: ${currentVariant.stock_quantity}`
-        );
-        return;
-      }
-    }
-
-    const { data: customer, error: customerError } = await supabase
-      .from("customers")
-      .insert({
-        name: customerName.trim() || "بدون اسم",
-        phone: cleanPhone,
-        phone2: phone2 || null,
-        city_id: cityId || null,
-        area_id: areaId || null,
-        address,
-        meta_link: metaLink || null,
-        whatsapp_link: whatsappLink || null,
-      })
-      .select()
-      .single();
-
-    if (customerError) {
-      setMessage("خطأ في حفظ العميل: " + customerError.message);
-      return;
-    }
-
-    let orderCode = "";
-
     try {
-      orderCode = await generateOrderCode();
-    } catch (error: any) {
-      setMessage("خطأ في إنشاء رقم الطلب: " + error.message);
-      return;
-    }
-
-    const { data: order, error: orderError } = await supabase
-      .from("orders")
-      .insert({
-        store_id: storeId,
-        customer_id: customer.id,
-        order_code: orderCode,
-        status: "new",
-        is_trial_order: isTrialOrder && isPrivateTripoliSelected(),
-        trial_status: isTrialOrder && isPrivateTripoliSelected() ? "open" : null,
-        trial_due_at:
-          isTrialOrder && isPrivateTripoliSelected()
-            ? new Date(Date.now() + 10 * 60 * 60 * 1000).toISOString()
-            : null,
-        total_amount:
-          isMayarShippingSelected && mayarParcelType === "exchange"
-            ? 0
-            : totalAmount,
-        total_cost: totalCost,
-        shipping_fee: shippingFee,
-        mayar_parcel_type: isMayarShippingSelected ? mayarParcelType : "full_delivery",
-        mayar_sent_pieces_count: isMayarShippingSelected ? mayarSentPiecesCount : 1,
-        mayar_return_pieces_count:
-          isMayarShippingSelected && mayarParcelType === "exchange"
-            ? mayarReturnPiecesCount
-            : 0,
-        mayar_openable: isMayarShippingSelected ? mayarOpenable : true,
-        exchange_original_order_id:
-          isMayarShippingSelected && mayarParcelType === "exchange"
-            ? exchangeOriginalOrder?.id || null
-            : null,
-        exchange_return_received: false,
-        scheduled_for: isScheduled && scheduledFor ? scheduledFor : null,
-        notes,
-        created_by: profile.id,
-      })
-      .select()
-      .single();
-
-    if (orderError) {
-      setMessage("خطأ في حفظ الطلب: " + orderError.message);
-      return;
-    }
-
-    for (const item of cart) {
-      const { error: itemError } = await supabase.from("order_items").insert({
-        order_id: order.id,
-        variant_id: item.variant_id,
-        quantity: item.quantity,
-        unit_price:
-          isMayarShippingSelected && mayarParcelType === "exchange"
-            ? 0
-            : item.sale_price,
-        unit_cost: item.cost_price,
-        is_trial_item: isTrialOrder && isPrivateTripoliSelected(),
-        trial_group_key:
-          isTrialOrder && isPrivateTripoliSelected()
-            ? getTrialGroupKey(item)
-            : null,
-        trial_kept: false,
+      const response = await fetch("/api/orders/create", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          customerName,
+          phone: cleanPhone,
+          phone2,
+          cityId,
+          areaId,
+          address,
+          metaLink,
+          whatsappLink,
+          storeId,
+          notes,
+          createdBy: profile.id,
+          isScheduled,
+          scheduledFor,
+          isTrialOrder: isTrialOrder && isPrivateTripoliSelected(),
+          shippingFee,
+          mayarParcelType,
+          mayarSentPiecesCount,
+          mayarReturnPiecesCount,
+          mayarOpenable,
+          exchangeOriginalOrderId:
+            isMayarShippingSelected && mayarParcelType === "exchange"
+              ? exchangeOriginalOrder?.id || null
+              : null,
+          exchangeReturnSelections,
+          cart,
+        }),
       });
 
-      if (itemError) {
-        setMessage(
-          "تم حفظ الطلب لكن حدث خطأ في أحد المنتجات: " + itemError.message
-        );
+      const result = await response.json();
+
+      if (!response.ok || !result.ok) {
+        setMessage(result.error || "فشل حفظ الطلب");
         return;
       }
 
-      const { data: freshVariant, error: freshVariantError } = await supabase
-        .from("product_variants")
-        .select("stock_quantity")
-        .eq("id", item.variant_id)
-        .single();
+      const orderCode = result.order?.order_code || "";
+      let mayarMessage = "";
 
-      if (freshVariantError) {
-        setMessage(
-          "تم حفظ الطلب لكن حدث خطأ في قراءة المخزون الحالي: " +
-            freshVariantError.message
-        );
-        return;
-      }
+      if (isMayarShippingSelected) {
+        setMessage("تم حفظ الطلب وخصم المخزون. جاري إرساله إلى شركة المعيار...");
 
-      const beforeQty = Number(freshVariant.stock_quantity || 0);
-      const afterQty = beforeQty - Number(item.quantity || 0);
+        try {
+          const mayarResponse = await fetch(
+            `/api/mayar/send-order?code=${encodeURIComponent(orderCode)}`
+          );
 
-      if (afterQty < 0) {
-        setMessage(
-          `تم حفظ الطلب لكن الكمية أصبحت غير كافية للمنتج ${item.product_name} / ${item.color} / ${item.size}`
-        );
-        return;
-      }
+          const mayarResult = await mayarResponse.json();
 
-      const { error: stockError } = await supabase
-        .from("product_variants")
-        .update({ stock_quantity: afterQty })
-        .eq("id", item.variant_id);
+          if (!mayarResponse.ok || !mayarResult.ok) {
+            mayarMessage = ` تم حفظ الطلب وخصم المخزون، لكن فشل الإرسال إلى المعيار: ${
+              mayarResult.error || "خطأ غير معروف"
+            }`;
+          } else {
+            const mayarCode =
+              mayarResult.shipment?.code ||
+              mayarResult.mayar_shipment_code ||
+              mayarResult.mayar_code ||
+              "";
 
-      if (stockError) {
-        setMessage(
-          "تم حفظ الطلب لكن حدث خطأ في خصم المخزون: " + stockError.message
-        );
-        return;
-      }
-
-      await supabase.from("inventory_movements").insert({
-        variant_id: item.variant_id,
-        movement_type: "sale",
-        quantity_change: -item.quantity,
-        quantity_before: beforeQty,
-        quantity_after: afterQty,
-        reason: `بيع - ${orderCode}`,
-      });
-    }
-
-    if (isMayarShippingSelected && mayarParcelType === "exchange") {
-      const originalItems = exchangeOriginalOrder?.order_items || [];
-      const exchangeRows = originalItems
-        .map((originalItem: any) => ({
-          exchange_order_id: order.id,
-          original_order_id: exchangeOriginalOrder.id,
-          original_order_item_id: originalItem.id,
-          variant_id: originalItem.variant_id,
-          quantity: Number(exchangeReturnSelections[originalItem.id] || 0),
-          inventory_restored: false,
-        }))
-        .filter((row: any) => row.quantity > 0);
-
-      const { error: exchangeItemsError } = await supabase
-        .from("order_exchange_return_items")
-        .insert(exchangeRows);
-
-      if (exchangeItemsError) {
-        setMessage(
-          "تم حفظ الطلب وخصم القطعة الجديدة، لكن فشل حفظ بيانات القطعة الراجعة: " +
-            exchangeItemsError.message
-        );
-        return;
-      }
-    }
-
-    let mayarMessage = "";
-
-    if (isMayarShippingSelected) {
-      setMessage("تم حفظ الطلب. جاري إرساله إلى شركة المعيار...");
-
-      try {
-        const mayarResponse = await fetch(
-          `/api/mayar/send-order?code=${encodeURIComponent(orderCode)}`
-        );
-
-        const mayarResult = await mayarResponse.json();
-
-        if (!mayarResponse.ok || !mayarResult.ok) {
-          mayarMessage = ` تم حفظ الطلب لكن فشل الإرسال إلى المعيار: ${
-            mayarResult.error || "خطأ غير معروف"
-          }`;
-        } else {
-          const mayarCode =
-            mayarResult.shipment?.code ||
-            mayarResult.mayar_shipment_code ||
-            mayarResult.mayar_code ||
-            "";
-
-          mayarMessage = mayarCode
-            ? ` وتم إرساله إلى المعيار. كود المعيار: ${mayarCode}`
-            : " وتم إرساله إلى المعيار.";
+            mayarMessage = mayarCode
+              ? ` وتم إرساله إلى المعيار. كود المعيار: ${mayarCode}`
+              : " وتم إرساله إلى المعيار.";
+          }
+        } catch (error: any) {
+          mayarMessage =
+            " تم حفظ الطلب وخصم المخزون، لكن فشل الاتصال بخدمة إرسال المعيار: " +
+            (error.message || "خطأ غير معروف");
         }
-      } catch (error: any) {
-        mayarMessage =
-          " تم حفظ الطلب لكن فشل الاتصال بخدمة إرسال المعيار: " +
-          (error.message || "خطأ غير معروف");
       }
-    }
 
-    setCustomerName("");
-    setPhone("");
-    setPhone2("");
-    setCityId("");
-    setAreaId("");
-    setCitySearch("");
-    setAreaSearch("");
-    setCityDropdownOpen(false);
-    setAreaDropdownOpen(false);
-    setAddress("");
-    setMetaLink("");
-    setWhatsappLink("");
-    setSelectedProductKey("");
-    setSize("");
-    setQuantity(1);
-    setCart([]);
-    setNotes("");
-    setIsScheduled(false);
-    setScheduledFor("");
-    setShippingFeeInput("0");
-    setShippingFeeTouched(false);
-    setIsTrialOrder(false);
-    setMayarParcelType("full_delivery");
-    setMayarSentPiecesCount(1);
-    setMayarReturnPiecesCount(1);
-    setMayarOpenable(true);
-    setExchangeOriginalCode("");
-    setExchangeOriginalOrder(null);
-    setExchangeReturnSelections({});
-    setExchangeLookupLoading(false);
-    setMessage(`تم حفظ الطلب ${orderCode} بنجاح.${mayarMessage} يمكنك إدخال طلب جديد الآن.`);
+      setCustomerName("");
+      setPhone("");
+      setPhone2("");
+      setCityId("");
+      setAreaId("");
+      setCitySearch("");
+      setAreaSearch("");
+      setCityDropdownOpen(false);
+      setAreaDropdownOpen(false);
+      setAddress("");
+      setMetaLink("");
+      setWhatsappLink("");
+      setSelectedProductKey("");
+      setSize("");
+      setQuantity(1);
+      setCart([]);
+      setNotes("");
+      setIsScheduled(false);
+      setScheduledFor("");
+      setShippingFeeInput("0");
+      setShippingFeeTouched(false);
+      setIsTrialOrder(false);
+      setMayarParcelType("full_delivery");
+      setMayarSentPiecesCount(1);
+      setMayarReturnPiecesCount(1);
+      setMayarOpenable(true);
+      setExchangeOriginalCode("");
+      setExchangeOriginalOrder(null);
+      setExchangeReturnSelections({});
+      setExchangeLookupLoading(false);
+      setMessage(
+        `تم حفظ الطلب ${orderCode} بنجاح وخصم القطع الجديدة من المخزون.${mayarMessage} يمكنك إدخال طلب جديد الآن.`
+      );
 
-    const { data: refreshedVariants } = await supabase
-      .from("product_variants")
-      .select(`
-        id,
-        store_id,
-        product_id,
-        color,
-        size,
-        stock_quantity,
-        cost_price,
-        sale_price,
-        image_url,
-        is_active,
-        products(
+      const { data: refreshedVariants } = await supabase
+        .from("product_variants")
+        .select(`
           id,
-          sku,
-          name,
-          model,
-          product_type,
-          main_image_url
-        )
-      `)
-      .eq("is_active", true)
-      .gt("stock_quantity", 0)
-      .order("created_at", { ascending: false });
+          store_id,
+          product_id,
+          color,
+          size,
+          stock_quantity,
+          cost_price,
+          sale_price,
+          image_url,
+          is_active,
+          products(
+            id,
+            sku,
+            name,
+            model,
+            product_type,
+            main_image_url
+          )
+        `)
+        .eq("is_active", true)
+        .gt("stock_quantity", 0)
+        .order("created_at", { ascending: false });
 
-    setVariants(refreshedVariants || []);
+      setVariants(refreshedVariants || []);
+    } catch (error: any) {
+      setMessage("فشل الاتصال بخادم حفظ الطلب: " + (error.message || "خطأ غير معروف"));
+    }
   }
 
   return (
