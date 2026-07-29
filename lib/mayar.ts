@@ -279,16 +279,6 @@ export async function mayarSaveShipment(
     1
   );
 
-  /*
-   * Accurate/Mayar expects returned pieces as a NEGATIVE quantity.
-   * Example:
-   * 2 pieces sent     => piecesCount: 2
-   * 2 pieces returned => returnPiecesCount: -2
-   */
-  const returnPiecesCount = isExchange
-    ? -positiveReturnPiecesCount
-    : -1;
-
   const input: Record<string, any> = {
     refNumber: shipmentInput.refNumber,
     serviceId: MAYAR_SERVICE_ID,
@@ -305,7 +295,11 @@ export async function mayarSaveShipment(
       Number(shipmentInput.recipientZoneId),
     recipientSubzoneId:
       Number(shipmentInput.recipientSubzoneId),
-    typeCode: isExchange ? "PTP" : "FDP",
+
+    // PDP هو النوع الذي أعاد خادم المعيار معه شرط أن يكون
+    // returnPiecesCount أصغر من أو يساوي -1.
+    typeCode: isExchange ? "PDP" : "FDP",
+
     openableCode:
       shipmentInput.openable === false ? "N" : "Y",
     paymentTypeCode: "COLC",
@@ -314,10 +308,19 @@ export async function mayarSaveShipment(
       ? 0
       : Number(shipmentInput.price || 0),
     piecesCount,
-    returnPiecesCount,
     weight: 1,
     notes: shipmentInput.notes || "",
   };
+
+  /*
+   * في شحنة PDP، خادم المعيار يعتبر القطع الراجعة حركة عكسية،
+   * ولذلك يطلب العدد بالسالب. مثال: قطعتان راجعتان = -2.
+   *
+   * لا نرسل الحقل أصلًا في الشحنة العادية FDP.
+   */
+  if (isExchange) {
+    input.returnPiecesCount = -positiveReturnPiecesCount;
+  }
 
   const data = await mayarGraphql<{
     saveShipment: {
