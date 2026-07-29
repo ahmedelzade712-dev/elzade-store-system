@@ -2,6 +2,10 @@ import { NextResponse } from "next/server";
 import { mayarLogin, mayarSaveShipment } from "@/lib/mayar";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
+type ExchangeReturnItemRow = {
+  quantity: number | string | null;
+};
+
 function getFirst(obj: any, keys: string[], fallback: any = null) {
   for (const key of keys) {
     if (obj && obj[key] !== undefined && obj[key] !== null && obj[key] !== "") {
@@ -12,8 +16,18 @@ function getFirst(obj: any, keys: string[], fallback: any = null) {
   return fallback;
 }
 
-function getPhone(value: any) {
+function getPhone(value: unknown) {
   return String(value || "").replace(/\s+/g, "").trim();
+}
+
+function toPositiveInteger(value: unknown, fallback = 1) {
+  const parsed = Number(value);
+
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+
+  return Math.max(1, Math.trunc(parsed));
 }
 
 async function saveMayarFailure(orderId: string | null, errorMessage: string) {
@@ -33,7 +47,7 @@ export async function GET(request: Request) {
 
   try {
     const { searchParams } = new URL(request.url);
-    const orderCode = searchParams.get("code");
+    const orderCode = searchParams.get("code")?.trim();
 
     if (!orderCode) {
       throw new Error("اكتب رقم الطلب في الرابط مثل ?code=A008");
@@ -90,7 +104,7 @@ export async function GET(request: Request) {
     const customer = order.customer;
 
     if (!customer) {
-      throw new Error("الطلب لا يحتوي على customer مرتبط");
+      throw new Error("الطلب لا يحتوي على عميل مرتبط");
     }
 
     const city = customer.city;
@@ -145,21 +159,57 @@ export async function GET(request: Request) {
     const parcelType = String(order.mayar_parcel_type || "full_delivery");
     const isExchange = parcelType === "exchange";
 
-    const sentPiecesCount = Math.max(
-      1,
-      Number(order.mayar_sent_pieces_count || 1)
+    const sentPiecesCount = toPositiveInteger(
+      order.mayar_sent_pieces_count,
+      1
     );
 
-    const rawReturnPiecesCount = Number(order.mayar_return_pieces_count);
+    let returnPiecesCount = 1;
 
-const returnPiecesCount = isExchange
-  ? Math.max(
-      1,
-      Number.isFinite(rawReturnPiecesCount)
-        ? Math.trunc(rawReturnPiecesCount)
-        : 1
-    )
-  : 1;
+    if (isExchange) {
+      const { data: returnRows, error: returnRowsError } = await supabaseAdmin
+        .from("order_exchange_return_items")
+        .select("quantity")
+        .eq("exchange_order_id", order.id);
+
+      if (returnRowsError) {
+        throw new Error(
+          "فشل قراءة عدد القطع المسترجعة المسجلة للاستبدال: " +
+            returnRowsError.message
+        );
+      }
+
+      const registeredReturnCount = (
+        (returnRows || []) as ExchangeReturnItemRow[]
+      ).reduce(
+        (sum, row) => sum + toPositiveInteger(row.quantity, 1),
+        0
+      );
+
+      const storedReturnCount = toPositiveInteger(
+        order.mayar_return_pieces_count,
+        1
+      );
+
+      /*
+       * نعتمد أولًا على القطع المسجلة فعليًا في جدول الاستبدال.
+       * إذا لم توجد لأي سبب، نستخدم العدد المحفوظ داخل الطلب.
+       */
+      returnPiecesCount =
+        registeredReturnCount > 0
+          ? registeredReturnCount
+          : storedReturnCount;
+
+      /*
+       * API المعيار الخاص بطرد مقابل طرد يرفض returnPiecesCount إذا كان 1.
+       * لذلك يجب أن يكون عدد القطع الراجعة 2 أو أكثر.
+       */
+      if (returnPiecesCount < 2) {
+        throw new Error(
+          `طلب الاستبدال مسجل بعدد قطع راجعة ${returnPiecesCount}. يجب أن يكون عدد القطع المسترجعة من الزبون 2 أو أكثر قبل الإرسال إلى المعيار.`
+        );
+      }
+    }
 
     const openable =
       order.mayar_openable === undefined || order.mayar_openable === null
@@ -176,34 +226,45 @@ const returnPiecesCount = isExchange
       recipientAddress: address || "-",
       recipientZoneId: Number(city.mayar_zone_id),
       recipientSubzoneId: Number(area.mayar_subzone_id),
-
-      // داخل Elzade يبقى الطلب بقيمته الحقيقية.
-      // عند طرد مقابل طرد، lib/mayar.ts يرسل السعر 0 للمعيار فقط.
       price: totalAmount,
-
       parcelType: isExchange ? "exchange" : "full_delivery",
       piecesCount: sentPiecesCount,
-      returnPiecesCount: returnPiecesCount,
+      returnPiecesCount: isExchange ? returnPiecesCount : 1,
       openable,
-
       notes: `Elzade ${order.order_code}${
         isExchange ? " - طرد مقابل طرد" : ""
       }${notes ? " - " + notes : ""}`,
     });
 
-    const updatePayload: any = {
+    const updatePayload: Record<string, any> = {
       mayar_status: "sent",
       mayar_error: null,
       mayar_sent_at: new Date().toISOString(),
     };
 
-    if ("mayar_shipment_id" in order) updatePayload.mayar_shipment_id = shipment.id;
-    if ("mayar_shipment_code" in order) updatePayload.mayar_shipment_code = shipment.code;
-    if ("mayar_tracking_url" in order) updatePayload.mayar_tracking_url = shipment.trackingUrl;
+    if ("mayar_shipment_id" in order) {
+      updatePayload.mayar_shipment_id = shipment.id;
+    }
 
-    if ("mayar_id" in order) updatePayload.mayar_id = shipment.id;
-    if ("mayar_code" in order) updatePayload.mayar_code = shipment.code;
-    if ("mayar_tracking" in order) updatePayload.mayar_tracking = shipment.trackingUrl;
+    if ("mayar_shipment_code" in order) {
+      updatePayload.mayar_shipment_code = shipment.code;
+    }
+
+    if ("mayar_tracking_url" in order) {
+      updatePayload.mayar_tracking_url = shipment.trackingUrl;
+    }
+
+    if ("mayar_id" in order) {
+      updatePayload.mayar_id = shipment.id;
+    }
+
+    if ("mayar_code" in order) {
+      updatePayload.mayar_code = shipment.code;
+    }
+
+    if ("mayar_tracking" in order) {
+      updatePayload.mayar_tracking = shipment.trackingUrl;
+    }
 
     const { error: updateError } = await supabaseAdmin
       .from("orders")
@@ -235,7 +296,7 @@ const returnPiecesCount = isExchange
       shipment,
     });
   } catch (error: any) {
-    const errorMessage = error.message || "Unknown send order error";
+    const errorMessage = error?.message || "Unknown send order error";
 
     await saveMayarFailure(loadedOrderId, errorMessage);
 

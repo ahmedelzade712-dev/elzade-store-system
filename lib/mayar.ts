@@ -274,10 +274,12 @@ export async function mayarSaveShipment(
     1
   );
 
-  const returnPiecesCount = toPositiveInteger(
-    shipmentInput.returnPiecesCount,
-    1
-  );
+  const returnPiecesCount = isExchange
+    ? Math.max(
+        2,
+        toPositiveInteger(shipmentInput.returnPiecesCount, 2)
+      )
+    : 1;
 
   const input: Record<string, any> = {
     refNumber: shipmentInput.refNumber,
@@ -304,11 +306,7 @@ export async function mayarSaveShipment(
       ? 0
       : Number(shipmentInput.price || 0),
     piecesCount,
-
-    // المعيار يتحقق من هذا الحقل ويشترط أن يكون أكبر من صفر.
-    // لذلك نرسله دائمًا بقيمة صحيحة، وليس فقط في حالة الاستبدال.
-    returnPiecesCount: isExchange ? returnPiecesCount : 1,
-
+    returnPiecesCount,
     weight: 1,
     notes: shipmentInput.notes || "",
   };
