@@ -45,6 +45,16 @@ export type MayarShipmentInput = {
   notes?: string;
 };
 
+function toPositiveInteger(value: unknown, fallback = 1) {
+  const parsed = Number(value);
+
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+
+  return Math.max(1, Math.trunc(parsed));
+}
+
 export async function mayarGraphql<T>(
   query: string,
   variables?: Record<string, any>,
@@ -259,6 +269,16 @@ export async function mayarSaveShipment(
   const isExchange =
     (shipmentInput.parcelType || "full_delivery") === "exchange";
 
+  const piecesCount = toPositiveInteger(
+    shipmentInput.piecesCount,
+    1
+  );
+
+  const returnPiecesCount = toPositiveInteger(
+    shipmentInput.returnPiecesCount,
+    1
+  );
+
   const input: Record<string, any> = {
     refNumber: shipmentInput.refNumber,
     serviceId: MAYAR_SERVICE_ID,
@@ -283,22 +303,15 @@ export async function mayarSaveShipment(
     price: isExchange
       ? 0
       : Number(shipmentInput.price || 0),
-    piecesCount: Math.max(
-      1,
-      Number(shipmentInput.piecesCount || 1)
-    ),
+    piecesCount,
+
+    // المعيار يتحقق من هذا الحقل ويشترط أن يكون أكبر من صفر.
+    // لذلك نرسله دائمًا بقيمة صحيحة، وليس فقط في حالة الاستبدال.
+    returnPiecesCount: isExchange ? returnPiecesCount : 1,
+
     weight: 1,
     notes: shipmentInput.notes || "",
   };
-
-  if (isExchange) {
-    input.returnPiecesCount = Math.max(
-      1,
-      Number(
-        shipmentInput.returnPiecesCount || 1
-      )
-    );
-  }
 
   const data = await mayarGraphql<{
     saveShipment: {

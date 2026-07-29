@@ -150,10 +150,16 @@ export async function GET(request: Request) {
       Number(order.mayar_sent_pieces_count || 1)
     );
 
-    const returnPiecesCount = Math.max(
+    const rawReturnPiecesCount = Number(order.mayar_return_pieces_count);
+
+const returnPiecesCount = isExchange
+  ? Math.max(
       1,
-      Number(order.mayar_return_pieces_count || 1)
-    );
+      Number.isFinite(rawReturnPiecesCount)
+        ? Math.trunc(rawReturnPiecesCount)
+        : 1
+    )
+  : 1;
 
     const openable =
       order.mayar_openable === undefined || order.mayar_openable === null
