@@ -274,12 +274,20 @@ export async function mayarSaveShipment(
     1
   );
 
+  const positiveReturnPiecesCount = toPositiveInteger(
+    shipmentInput.returnPiecesCount,
+    1
+  );
+
+  /*
+   * Accurate/Mayar expects returned pieces as a NEGATIVE quantity.
+   * Example:
+   * 2 pieces sent     => piecesCount: 2
+   * 2 pieces returned => returnPiecesCount: -2
+   */
   const returnPiecesCount = isExchange
-    ? Math.max(
-        2,
-        toPositiveInteger(shipmentInput.returnPiecesCount, 2)
-      )
-    : 1;
+    ? -positiveReturnPiecesCount
+    : -1;
 
   const input: Record<string, any> = {
     refNumber: shipmentInput.refNumber,
@@ -297,7 +305,7 @@ export async function mayarSaveShipment(
       Number(shipmentInput.recipientZoneId),
     recipientSubzoneId:
       Number(shipmentInput.recipientSubzoneId),
-    typeCode: isExchange ? "PDP" : "FDP",
+    typeCode: isExchange ? "PTP" : "FDP",
     openableCode:
       shipmentInput.openable === false ? "N" : "Y",
     paymentTypeCode: "COLC",
@@ -310,22 +318,6 @@ export async function mayarSaveShipment(
     weight: 1,
     notes: shipmentInput.notes || "",
   };
-
-  console.log("===== MAYAR INPUT START =====");
-  console.log(
-    JSON.stringify(
-      {
-        parcelType: shipmentInput.parcelType,
-        isExchange,
-        piecesCount,
-        returnPiecesCount,
-        input,
-      },
-      null,
-      2
-    )
-  );
-  console.log("===== MAYAR INPUT END =====");
 
   const data = await mayarGraphql<{
     saveShipment: {
