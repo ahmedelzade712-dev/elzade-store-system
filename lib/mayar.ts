@@ -311,6 +311,22 @@ export async function mayarSaveShipment(
     notes: shipmentInput.notes || "",
   };
 
+  console.log("===== MAYAR INPUT START =====");
+  console.log(
+    JSON.stringify(
+      {
+        parcelType: shipmentInput.parcelType,
+        isExchange,
+        piecesCount,
+        returnPiecesCount,
+        input,
+      },
+      null,
+      2
+    )
+  );
+  console.log("===== MAYAR INPUT END =====");
+
   const data = await mayarGraphql<{
     saveShipment: {
       id: number;
