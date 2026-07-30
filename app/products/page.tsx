@@ -5,6 +5,25 @@ import { supabase } from "@/lib/supabase";
 
 const PRODUCT_TYPES = ["بيجامة", "عباية", "بدلة", "حقيبة", "حذاء", "أخرى"];
 
+const STOCK_REASONS = [
+  "بضاعة جديدة",
+  "تالف",
+  "جرد المخزون",
+  "تصحيح خطأ",
+  "استخدام للتصوير",
+  "هدية",
+  "فقدان",
+  "نقل أو تسوية مخزون",
+  "سبب آخر",
+];
+
+type StockOperation = "add" | "subtract";
+
+type StockInput = {
+  operation: StockOperation;
+  quantity: string;
+};
+
 export default function ProductsPage() {
 
   function getSizeSortValue(size: string) {
@@ -35,11 +54,14 @@ export default function ProductsPage() {
   const [search, setSearch] = useState("");
   const [storeFilter, setStoreFilter] = useState("");
 
-  const [addStockItem, setAddStockItem] = useState<any>(null);
+  const [stockItem, setStockItem] = useState<any>(null);
+  const [savingStock, setSavingStock] = useState(false);
   const [editItem, setEditItem] = useState<any>(null);
   const [deleteItem, setDeleteItem] = useState<any>(null);
 
-  const [stockInputs, setStockInputs] = useState<Record<string, string>>({});
+  const [stockInputs, setStockInputs] = useState<Record<string, StockInput>>({});
+  const [stockReason, setStockReason] = useState("");
+  const [stockNote, setStockNote] = useState("");
 
   const [editName, setEditName] = useState("");
   const [editModel, setEditModel] = useState("");
@@ -160,16 +182,45 @@ export default function ProductsPage() {
     });
   }, [groupedProducts, search, storeFilter]);
 
-  function openAddStock(item: any) {
-    setAddStockItem(item);
+  function openStockAdjustment(item: any) {
+    const inputs: Record<string, StockInput> = {};
 
-    const inputs: Record<string, string> = {};
     item.sizes.forEach((sizeRow: any) => {
-      inputs[sizeRow.variant_id] = "";
+      inputs[sizeRow.variant_id] = {
+        operation: "add",
+        quantity: "",
+      };
     });
 
+    setStockItem(item);
     setStockInputs(inputs);
+    setStockReason("");
+    setStockNote("");
     setMessage("");
+  }
+
+  function closeStockAdjustment() {
+    if (savingStock) return;
+
+    setStockItem(null);
+    setStockInputs({});
+    setStockReason("");
+    setStockNote("");
+  }
+
+  function updateStockInput(
+    variantId: string,
+    field: keyof StockInput,
+    value: string
+  ) {
+    setStockInputs((previous) => ({
+      ...previous,
+      [variantId]: {
+        operation: previous[variantId]?.operation || "add",
+        quantity: previous[variantId]?.quantity || "",
+        [field]: value,
+      },
+    }));
   }
 
   function openEdit(item: any) {
@@ -184,52 +235,117 @@ export default function ProductsPage() {
     setMessage("");
   }
 
-  async function handleAddStock() {
-    if (!addStockItem) return;
+  async function handleStockAdjustment() {
+    if (!stockItem || savingStock) return;
 
-    setMessage("جاري إضافة الكمية...");
+    const changes = stockItem.sizes
+      .map((sizeRow: any) => {
+        const input = stockInputs[sizeRow.variant_id];
+        const enteredQuantity = Number(input?.quantity || 0);
 
-    let hasAnyQuantity = false;
+        return {
+          ...sizeRow,
+          operation: input?.operation || "add",
+          enteredQuantity,
+        };
+      })
+      .filter((row: any) => row.enteredQuantity > 0);
 
-    for (const sizeRow of addStockItem.sizes) {
-      const qtyToAdd = Number(stockInputs[sizeRow.variant_id] || 0);
-
-      if (qtyToAdd > 0) {
-        hasAnyQuantity = true;
-
-        const beforeQty = Number(sizeRow.quantity || 0);
-        const afterQty = beforeQty + qtyToAdd;
-
-        const { error: updateError } = await supabase
-          .from("product_variants")
-          .update({ stock_quantity: afterQty })
-          .eq("id", sizeRow.variant_id);
-
-        if (updateError) {
-          setMessage("خطأ في إضافة كمية للمقاس " + sizeRow.size + ": " + updateError.message);
-          return;
-        }
-
-        await supabase.from("inventory_movements").insert({
-          variant_id: sizeRow.variant_id,
-          movement_type: "add_stock",
-          quantity_change: qtyToAdd,
-          quantity_before: beforeQty,
-          quantity_after: afterQty,
-          reason: "إضافة كمية من صفحة المنتجات",
-        });
-      }
-    }
-
-    if (!hasAnyQuantity) {
+    if (changes.length === 0) {
       setMessage("اكتب كمية لمقاس واحد على الأقل");
       return;
     }
 
-    setAddStockItem(null);
-    setStockInputs({});
-    setMessage("تمت إضافة الكمية بنجاح");
-    await loadData();
+    if (!stockReason) {
+      setMessage("يجب اختيار سبب تعديل المخزون");
+      return;
+    }
+
+    if (stockReason === "سبب آخر" && !stockNote.trim()) {
+      setMessage("اكتب ملاحظة توضح سبب تعديل المخزون");
+      return;
+    }
+
+    for (const row of changes) {
+      if (!Number.isInteger(row.enteredQuantity)) {
+        setMessage(`كمية المقاس ${row.size} يجب أن تكون رقمًا صحيحًا`);
+        return;
+      }
+
+      if (
+        row.operation === "subtract" &&
+        row.enteredQuantity > Number(row.quantity || 0)
+      ) {
+        setMessage(
+          `لا يمكن خصم ${row.enteredQuantity} من المقاس ${row.size} لأن الكمية الحالية ${row.quantity} فقط`
+        );
+        return;
+      }
+    }
+
+    setSavingStock(true);
+    setMessage("جاري تعديل المخزون...");
+
+    try {
+      for (const row of changes) {
+        const beforeQty = Number(row.quantity || 0);
+        const signedChange =
+          row.operation === "add"
+            ? row.enteredQuantity
+            : -row.enteredQuantity;
+        const afterQty = beforeQty + signedChange;
+
+        const { error: updateError } = await supabase
+          .from("product_variants")
+          .update({ stock_quantity: afterQty })
+          .eq("id", row.variant_id);
+
+        if (updateError) {
+          throw new Error(
+            `خطأ في تحديث المقاس ${row.size}: ${updateError.message}`
+          );
+        }
+
+        const fullReason = stockNote.trim()
+          ? `${stockReason} - ${stockNote.trim()}`
+          : stockReason;
+
+        const { error: movementError } = await supabase
+          .from("inventory_movements")
+          .insert({
+            variant_id: row.variant_id,
+            movement_type:
+              row.operation === "add" ? "add_stock" : "remove_stock",
+            quantity_change: signedChange,
+            quantity_before: beforeQty,
+            quantity_after: afterQty,
+            reason: fullReason,
+          });
+
+        if (movementError) {
+          await supabase
+            .from("product_variants")
+            .update({ stock_quantity: beforeQty })
+            .eq("id", row.variant_id);
+
+          throw new Error(
+            `تم إلغاء تعديل المقاس ${row.size} لأن تسجيل حركة المخزون فشل: ${movementError.message}`
+          );
+        }
+      }
+
+      setStockItem(null);
+      setStockInputs({});
+      setStockReason("");
+      setStockNote("");
+      setMessage("تم تعديل المخزون وتسجيل الحركة بنجاح");
+      await loadData();
+    } catch (error: any) {
+      setMessage(error?.message || "حدث خطأ أثناء تعديل المخزون");
+      await loadData();
+    } finally {
+      setSavingStock(false);
+    }
   }
 
   async function handleEditProduct() {
@@ -425,10 +541,10 @@ export default function ProductsPage() {
                 </button>
 
                 <button
-                  onClick={() => openAddStock(item)}
+                  onClick={() => openStockAdjustment(item)}
                   className="rounded-lg bg-green-600 px-3 py-2 text-sm font-bold"
                 >
-                  إضافة كمية
+                  تعديل المخزون
                 </button>
 
                 <button
@@ -443,47 +559,127 @@ export default function ProductsPage() {
         </div>
       )}
 
-      {addStockItem && (
+      {stockItem && (
         <div className="fixed inset-0 z-50 overflow-y-auto bg-black/70 p-4">
-          <div className="mx-auto my-8 w-full max-w-lg rounded-2xl bg-neutral-900 p-6">
-            <h2 className="mb-2 text-2xl font-bold">إضافة كمية</h2>
-            <p className="mb-5 text-neutral-400">
-              {addStockItem.product?.name} / {addStockItem.product?.model || "-"} / {addStockItem.color}
+          <div className="mx-auto my-8 w-full max-w-3xl rounded-2xl bg-neutral-900 p-6">
+            <h2 className="mb-2 text-2xl font-bold">تعديل المخزون</h2>
+            <p className="mb-2 text-neutral-300">
+              {stockItem.product?.name} / {stockItem.product?.model || "-"} / {stockItem.color}
+            </p>
+            <p className="mb-5 text-sm text-neutral-400">
+              اختر إضافة أو خصم أمام كل مقاس، ثم اكتب الكمية المطلوبة.
             </p>
 
-            <p className="mb-4 text-sm text-neutral-400">
-              اكتب الكمية التي تريد إضافتها أمام المقاس المطلوب، ثم اضغط حفظ في أسفل النافذة.
-            </p>
-
-            <div className="max-h-[60vh] overflow-y-auto pr-1">
+            <div className="max-h-[48vh] overflow-y-auto pr-1">
               <div className="grid gap-3">
-                {addStockItem.sizes.map((sizeRow: any) => (
-                  <div key={sizeRow.variant_id} className="grid grid-cols-3 items-center gap-3 rounded-xl bg-neutral-800 p-3">
-                  <p className="font-bold">{sizeRow.size}</p>
-                  <p className="text-sm text-neutral-400">الحالي: {sizeRow.quantity}</p>
-                  <input
-                    className="rounded-lg bg-neutral-900 p-3"
-                    type="number"
-                    min="0"
-                    placeholder="+ كمية"
-                    value={stockInputs[sizeRow.variant_id] || ""}
-                    onChange={(e) =>
-                      setStockInputs((prev) => ({
-                        ...prev,
-                        [sizeRow.variant_id]: e.target.value,
-                      }))
-                    }
-                  />
-                  </div>
-                ))}
+                {stockItem.sizes.map((sizeRow: any) => {
+                  const input = stockInputs[sizeRow.variant_id] || {
+                    operation: "add",
+                    quantity: "",
+                  };
+
+                  const preview =
+                    Number(sizeRow.quantity || 0) +
+                    (input.operation === "add" ? 1 : -1) *
+                      Number(input.quantity || 0);
+
+                  return (
+                    <div
+                      key={sizeRow.variant_id}
+                      className="grid gap-3 rounded-xl bg-neutral-800 p-3 md:grid-cols-4 md:items-center"
+                    >
+                      <div>
+                        <p className="text-lg font-bold">{sizeRow.size}</p>
+                        <p className="text-sm text-neutral-400">
+                          الحالي: {sizeRow.quantity}
+                        </p>
+                      </div>
+
+                      <select
+                        className="rounded-lg bg-neutral-900 p-3"
+                        value={input.operation}
+                        onChange={(e) =>
+                          updateStockInput(
+                            sizeRow.variant_id,
+                            "operation",
+                            e.target.value
+                          )
+                        }
+                      >
+                        <option value="add">➕ إضافة</option>
+                        <option value="subtract">➖ خصم</option>
+                      </select>
+
+                      <input
+                        className="rounded-lg bg-neutral-900 p-3"
+                        type="number"
+                        min="0"
+                        step="1"
+                        placeholder="الكمية"
+                        value={input.quantity}
+                        onChange={(e) =>
+                          updateStockInput(
+                            sizeRow.variant_id,
+                            "quantity",
+                            e.target.value
+                          )
+                        }
+                      />
+
+                      <div
+                        className={`rounded-lg p-3 text-center text-sm ${
+                          preview < 0
+                            ? "bg-red-950 text-red-300"
+                            : "bg-neutral-900"
+                        }`}
+                      >
+                        بعد التعديل: <span className="font-bold">{preview}</span>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
 
+            <div className="mt-5 grid gap-3 md:grid-cols-2">
+              <select
+                className="rounded-xl bg-neutral-800 p-4"
+                value={stockReason}
+                onChange={(e) => setStockReason(e.target.value)}
+              >
+                <option value="">اختر سبب التعديل *</option>
+                {STOCK_REASONS.map((reason) => (
+                  <option key={reason} value={reason}>
+                    {reason}
+                  </option>
+                ))}
+              </select>
+
+              <input
+                className="rounded-xl bg-neutral-800 p-4"
+                placeholder={
+                  stockReason === "سبب آخر"
+                    ? "اكتب السبب بالتفصيل *"
+                    : "ملاحظة إضافية (اختياري)"
+                }
+                value={stockNote}
+                onChange={(e) => setStockNote(e.target.value)}
+              />
+            </div>
+
             <div className="sticky bottom-0 mt-6 flex gap-3 border-t border-neutral-800 bg-neutral-900 pt-4">
-              <button onClick={handleAddStock} className="flex-1 rounded-xl bg-white p-3 font-bold text-black">
-                حفظ
+              <button
+                onClick={handleStockAdjustment}
+                disabled={savingStock}
+                className="flex-1 rounded-xl bg-white p-3 font-bold text-black disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {savingStock ? "جاري الحفظ..." : "حفظ تعديل المخزون"}
               </button>
-              <button onClick={() => setAddStockItem(null)} className="flex-1 rounded-xl border border-neutral-700 p-3">
+              <button
+                onClick={closeStockAdjustment}
+                disabled={savingStock}
+                className="flex-1 rounded-xl border border-neutral-700 p-3 disabled:cursor-not-allowed disabled:opacity-60"
+              >
                 إلغاء
               </button>
             </div>
