@@ -41,6 +41,49 @@ function firstDayOfMonth() {
   return dateInputValue(date);
 }
 
+function getRelatedOrder(transaction: any) {
+  return Array.isArray(transaction.orders)
+    ? transaction.orders[0]
+    : transaction.orders;
+}
+
+function getOrderCode(transaction: any) {
+  return getRelatedOrder(transaction)?.order_code || "—";
+}
+
+function displayDescription(transaction: any) {
+  const description = String(transaction.description || "").trim();
+
+  if (
+    transaction.reversed_transaction_id ||
+    description.includes("حركة عكسية")
+  ) {
+    return description.replace(/حركة عكسية/g, "طلبية مرتجعة") ||
+      "طلبية مرتجعة";
+  }
+
+  return description || "—";
+}
+
+function displayMovementType(transaction: any) {
+  if (
+    transaction.reversed_transaction_id ||
+    String(transaction.description || "").includes("حركة عكسية")
+  ) {
+    return "طلبية مرتجعة";
+  }
+
+  if (transaction.transaction_type === "sale") return "مبيعات";
+  if (transaction.transaction_type === "courier_reward")
+    return "مكافأة مندوب";
+  if (transaction.transaction_type === "expense")
+    return transaction.category || "مصروف";
+  if (transaction.transaction_type === "adjustment")
+    return transaction.direction === "credit" ? "إضافة يدوية" : "خصم يدوي";
+
+  return transaction.category || transaction.transaction_type || "حركة مالية";
+}
+
 export default function FinancialReportsPage() {
   const [profile, setProfile] = useState<any>(null);
   const [stores, setStores] = useState<any[]>([]);
@@ -64,6 +107,9 @@ export default function FinancialReportsPage() {
   const [movementDescription, setMovementDescription] = useState("");
   const [movementStoreId, setMovementStoreId] = useState("");
   const [savingMovement, setSavingMovement] = useState(false);
+  const [showBalanceDetails, setShowBalanceDetails] = useState(false);
+  const [showManualExpensesDetails, setShowManualExpensesDetails] =
+    useState(false);
 
   useEffect(() => {
     loadData();
@@ -195,13 +241,51 @@ export default function FinancialReportsPage() {
     )
     .reduce((sum, transaction) => sum + Number(transaction.amount || 0), 0);
 
-  const periodExpenses = filteredTransactions
-    .filter(
-      (transaction) =>
-        transaction.direction === "debit" &&
-        transaction.transaction_type !== "courier_reward"
-    )
-    .reduce((sum, transaction) => sum + Number(transaction.amount || 0), 0);
+  const manualExpenseTransactions = useMemo(
+    () =>
+      filteredTransactions.filter(
+        (transaction) =>
+          transaction.direction === "debit" &&
+          transaction.is_system_generated === false
+      ),
+    [filteredTransactions]
+  );
+
+  const periodExpenses = manualExpenseTransactions.reduce(
+    (sum, transaction) => sum + Number(transaction.amount || 0),
+    0
+  );
+
+  const balanceTransactions = useMemo(
+    () =>
+      transactions.filter(
+        (transaction) =>
+          !storeFilter || transaction.store_id === storeFilter
+      ),
+    [transactions, storeFilter]
+  );
+
+  const balanceRows = useMemo(() => {
+    let runningBalance = 0;
+
+    return [...balanceTransactions]
+      .sort(
+        (a, b) =>
+          new Date(a.occurred_at).getTime() -
+          new Date(b.occurred_at).getTime()
+      )
+      .map((transaction) => {
+        const amount = Number(transaction.amount || 0);
+        runningBalance +=
+          transaction.direction === "credit" ? amount : -amount;
+
+        return {
+          ...transaction,
+          runningBalance,
+        };
+      })
+      .reverse();
+  }, [balanceTransactions]);
 
   const uniqueSoldOrders = useMemo(() => {
     const map = new Map<string, any>();
@@ -294,7 +378,7 @@ export default function FinancialReportsPage() {
         .filter(
           (transaction) =>
             transaction.direction === "debit" &&
-            transaction.transaction_type !== "courier_reward"
+            transaction.is_system_generated === false
         )
         .reduce((sum, transaction) => sum + Number(transaction.amount || 0), 0);
 
@@ -483,10 +567,19 @@ export default function FinancialReportsPage() {
       </div>
 
       <div className="mb-6 grid gap-3 md:grid-cols-4 xl:grid-cols-7">
-        <div className="rounded-2xl border border-green-800 bg-green-950/30 p-5">
+        <button
+          type="button"
+          onClick={() => setShowBalanceDetails(true)}
+          className="rounded-2xl border border-green-800 bg-green-950/30 p-5 text-right transition hover:border-green-500 hover:bg-green-950/50"
+        >
           <p className="text-sm text-green-300">الرصيد الحالي</p>
-          <p dir="ltr" className="mt-2 text-2xl font-black text-right">{money(allTimeBalance)}</p>
-        </div>
+          <p dir="ltr" className="mt-2 text-2xl font-black text-right">
+            {money(allTimeBalance)}
+          </p>
+          <p className="mt-3 text-xs text-green-400">
+            اضغط لعرض جميع الإضافات والخصومات
+          </p>
+        </button>
 
         <div className="rounded-2xl border border-blue-800 bg-blue-950/30 p-5">
           <p className="text-sm text-blue-300">مبيعات الفترة</p>
@@ -498,10 +591,19 @@ export default function FinancialReportsPage() {
           <p dir="ltr" className="mt-2 text-2xl font-black text-right">{money(periodProfit)}</p>
         </div>
 
-        <div className="rounded-2xl border border-red-800 bg-red-950/30 p-5">
+        <button
+          type="button"
+          onClick={() => setShowManualExpensesDetails(true)}
+          className="rounded-2xl border border-red-800 bg-red-950/30 p-5 text-right transition hover:border-red-500 hover:bg-red-950/50"
+        >
           <p className="text-sm text-red-300">المصروفات والخصومات</p>
-          <p dir="ltr" className="mt-2 text-2xl font-black text-right">{money(periodExpenses)}</p>
-        </div>
+          <p dir="ltr" className="mt-2 text-2xl font-black text-right">
+            {money(periodExpenses)}
+          </p>
+          <p className="mt-3 text-xs text-red-400">
+            اضغط لعرض المصروفات والخصومات اليدوية
+          </p>
+        </button>
 
         <div className="rounded-2xl border border-orange-800 bg-orange-950/30 p-5">
           <p className="text-sm text-orange-300">مكافآت المناديب</p>
@@ -705,7 +807,7 @@ export default function FinancialReportsPage() {
                       {transaction.direction === "credit" ? "إضافة" : "خصم"}
                     </td>
                     <td className="p-4">{transaction.category}</td>
-                    <td className="p-4">{transaction.description}</td>
+                    <td className="p-4">{displayDescription(transaction)}</td>
                     <td className="p-4 font-black">
                       {transaction.direction === "credit" ? "+" : "-"}
                       {money(transaction.amount)}
@@ -722,6 +824,222 @@ export default function FinancialReportsPage() {
           </table>
         </div>
       </section>
+
+      {showBalanceDetails && (
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-black/80 p-4">
+          <div className="mx-auto my-6 w-full max-w-7xl rounded-2xl border border-green-900 bg-neutral-950 p-6">
+            <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="text-2xl font-bold">تفاصيل الرصيد الحالي</h2>
+                <p className="mt-1 text-sm text-neutral-400">
+                  جميع الحركات التي أثرت على الرصيد للمتجر المحدد، من الأحدث إلى الأقدم
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setShowBalanceDetails(false)}
+                className="rounded-lg border border-neutral-700 px-4 py-2 font-bold"
+              >
+                إغلاق
+              </button>
+            </div>
+
+            <div className="mb-5 rounded-xl border border-green-800 bg-green-950/30 p-4">
+              <p className="text-sm text-green-300">الرصيد الحالي</p>
+              <p dir="ltr" className="mt-1 text-3xl font-black text-right">
+                {money(allTimeBalance)}
+              </p>
+            </div>
+
+            <div className="overflow-x-auto rounded-2xl border border-neutral-800">
+              <table className="w-full min-w-[1250px] text-right">
+                <thead className="bg-neutral-900 text-sm text-neutral-300">
+                  <tr>
+                    <th className="p-4">التاريخ والوقت</th>
+                    <th className="p-4">المتجر</th>
+                    <th className="p-4">نوع الحركة</th>
+                    <th className="p-4">كود الطلب</th>
+                    <th className="p-4">البيان</th>
+                    <th className="p-4">إضافة</th>
+                    <th className="p-4">خصم</th>
+                    <th className="p-4">الرصيد بعد الحركة</th>
+                    <th className="p-4">المصدر</th>
+                  </tr>
+                </thead>
+
+                <tbody>
+                  {balanceRows.length === 0 ? (
+                    <tr>
+                      <td
+                        colSpan={9}
+                        className="p-8 text-center text-neutral-400"
+                      >
+                        لا توجد حركات مالية
+                      </td>
+                    </tr>
+                  ) : (
+                    balanceRows.map((transaction) => (
+                      <tr
+                        key={`balance-${transaction.id}`}
+                        className="border-t border-neutral-800"
+                      >
+                        <td className="whitespace-nowrap p-4">
+                          {new Date(transaction.occurred_at).toLocaleString(
+                            "en-GB",
+                            {
+                              day: "2-digit",
+                              month: "2-digit",
+                              year: "numeric",
+                              hour: "2-digit",
+                              minute: "2-digit",
+                              hour12: false,
+                            }
+                          )}
+                        </td>
+                        <td className="p-4">
+                          {transaction.stores?.name || "عام"}
+                        </td>
+                        <td className="p-4 font-bold">
+                          {displayMovementType(transaction)}
+                        </td>
+                        <td dir="ltr" className="p-4 text-right font-bold">
+                          {getOrderCode(transaction)}
+                        </td>
+                        <td className="p-4">
+                          {displayDescription(transaction)}
+                        </td>
+                        <td className="p-4 font-black text-green-400">
+                          {transaction.direction === "credit"
+                            ? `+${money(transaction.amount)}`
+                            : "—"}
+                        </td>
+                        <td className="p-4 font-black text-red-400">
+                          {transaction.direction === "debit"
+                            ? `-${money(transaction.amount)}`
+                            : "—"}
+                        </td>
+                        <td
+                          dir="ltr"
+                          className={`p-4 text-right font-black ${
+                            transaction.runningBalance >= 0
+                              ? "text-green-300"
+                              : "text-red-300"
+                          }`}
+                        >
+                          {money(transaction.runningBalance)}
+                        </td>
+                        <td className="p-4 text-sm text-neutral-400">
+                          {transaction.is_system_generated
+                            ? "تلقائي"
+                            : "إدخال يدوي"}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showManualExpensesDetails && (
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-black/80 p-4">
+          <div className="mx-auto my-6 w-full max-w-6xl rounded-2xl border border-red-900 bg-neutral-950 p-6">
+            <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="text-2xl font-bold">
+                  تفاصيل المصروفات والخصومات
+                </h2>
+                <p className="mt-1 text-sm text-neutral-400">
+                  يعرض فقط الحركات اليدوية التي أُدخلت ضمن الفترة المحددة
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setShowManualExpensesDetails(false)}
+                className="rounded-lg border border-neutral-700 px-4 py-2 font-bold"
+              >
+                إغلاق
+              </button>
+            </div>
+
+            <div className="mb-5 rounded-xl border border-red-800 bg-red-950/30 p-4">
+              <p className="text-sm text-red-300">
+                إجمالي المصروفات والخصومات
+              </p>
+              <p dir="ltr" className="mt-1 text-3xl font-black text-right">
+                {money(periodExpenses)}
+              </p>
+            </div>
+
+            <div className="overflow-x-auto rounded-2xl border border-neutral-800">
+              <table className="w-full min-w-[1000px] text-right">
+                <thead className="bg-neutral-900 text-sm text-neutral-300">
+                  <tr>
+                    <th className="p-4">التاريخ والوقت</th>
+                    <th className="p-4">المتجر</th>
+                    <th className="p-4">التصنيف</th>
+                    <th className="p-4">البيان</th>
+                    <th className="p-4">القيمة</th>
+                  </tr>
+                </thead>
+
+                <tbody>
+                  {manualExpenseTransactions.length === 0 ? (
+                    <tr>
+                      <td
+                        colSpan={5}
+                        className="p-8 text-center text-neutral-400"
+                      >
+                        لا توجد مصروفات أو خصومات يدوية ضمن الفترة المحددة
+                      </td>
+                    </tr>
+                  ) : (
+                    manualExpenseTransactions.map((transaction) => (
+                      <tr
+                        key={`manual-expense-${transaction.id}`}
+                        className="border-t border-neutral-800"
+                      >
+                        <td className="whitespace-nowrap p-4">
+                          {new Date(transaction.occurred_at).toLocaleString(
+                            "en-GB",
+                            {
+                              day: "2-digit",
+                              month: "2-digit",
+                              year: "numeric",
+                              hour: "2-digit",
+                              minute: "2-digit",
+                              hour12: false,
+                            }
+                          )}
+                        </td>
+                        <td className="p-4">
+                          {transaction.stores?.name || "عام"}
+                        </td>
+                        <td className="p-4 font-bold">
+                          {transaction.category || "أخرى"}
+                        </td>
+                        <td className="p-4">
+                          {displayDescription(transaction)}
+                        </td>
+                        <td
+                          dir="ltr"
+                          className="p-4 text-right font-black text-red-400"
+                        >
+                          -{money(transaction.amount)}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showAddMovement && (
         <div className="fixed inset-0 z-50 overflow-y-auto bg-black/70 p-4">
