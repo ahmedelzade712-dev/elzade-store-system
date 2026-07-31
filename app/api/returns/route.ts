@@ -156,6 +156,19 @@ async function insertFinancialReversalIfMissing(transaction: any, order: any) {
   }
 }
 
+
+async function insertPartialReturnTransaction(order: any, returnedAmount: number) {
+  const sourceKey = `return:${order.id}:partial-products`;
+  const { error } = await supabaseAdmin.from("financial_transactions").insert({
+    store_id: order.store_id, order_id: order.id, transaction_type: "return", direction: "debit",
+    category: "استرجاع جزئي", amount: Number(returnedAmount || 0),
+    description: `خصم قيمة القطع الراجعة جزئيًا من الطلب ${order.order_code}`,
+    source_key: sourceKey, is_system_generated: true, occurred_at: new Date().toISOString(),
+    metadata: { order_code: order.order_code, return_type: "partial", returned_amount: Number(returnedAmount || 0) },
+  });
+  if (error && error.code !== "23505") throw new Error("خطأ في تسجيل الاسترجاع الجزئي: " + error.message);
+}
+
 async function findPendingExchangeForOriginalOrder(originalOrderId: string) {
   const { data: exchangeOrder, error: exchangeError } = await supabaseAdmin
     .from("orders")
@@ -279,6 +292,8 @@ export async function POST(request: Request) {
     const body = await request.json();
     const code = String(body?.code || "").trim();
     const reason = String(body?.reason || "").trim();
+    const returnMode = body?.return_mode === "partial" ? "partial" : "full";
+    const requestedReturnedItems = Array.isArray(body?.returned_items) ? body.returned_items : [];
 
     if (!code) {
       throw new Error("أدخل كود الطلب أو كود المعيار");
@@ -430,181 +445,87 @@ export async function POST(request: Request) {
     }
 
     let { data: returnRecord, error: returnReadError } = await supabaseAdmin
-      .from("order_returns")
-      .select("*")
-      .eq("order_id", order.id)
-      .maybeSingle();
+      .from("order_returns").select("*").eq("order_id", order.id).maybeSingle();
 
-    if (returnReadError) {
-      throw new Error(returnReadError.message);
+    if (returnReadError) throw new Error(returnReadError.message);
+    if (returnRecord?.inventory_restored || returnRecord?.financial_reversed) {
+      return NextResponse.json({ ok: false, error: "تم تنفيذ استرجاع لهذا الطلب سابقًا" }, { status: 409 });
     }
 
-    if (
-      returnRecord?.inventory_restored &&
-      returnRecord?.financial_reversed
-    ) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "تم استرجاع هذا الطلب سابقًا",
-        },
-        { status: 409 }
-      );
+    const itemById = new Map<string, any>(
+      normalized.items.map((item: any) => [String(item.id), item])
+    );
+    let selectedItems: any[] = [];
+
+    if (returnMode === "full") {
+      selectedItems = normalized.items.map((item: any) => ({ ...item, return_quantity: Number(item.quantity || 0) }));
+    } else {
+      selectedItems = requestedReturnedItems.map((row: any) => {
+        const item = itemById.get(String(row?.order_item_id || ""));
+        const quantity = Math.floor(Number(row?.quantity || 0));
+        if (!item || quantity <= 0) return null;
+        if (quantity > Number(item.quantity || 0)) throw new Error(`الكمية الراجعة للمنتج ${item.product_name} أكبر من كمية الطلب`);
+        return { ...item, return_quantity: quantity };
+      }).filter(Boolean);
+      if (selectedItems.length === 0) throw new Error("حدد قطعة واحدة على الأقل للاسترجاع الجزئي");
     }
+
+    const totalOrderedQuantity = normalized.items.reduce((sum: number, item: any) => sum + Number(item.quantity || 0), 0);
+    const totalReturnedQuantity = selectedItems.reduce((sum: number, item: any) => sum + Number(item.return_quantity || 0), 0);
+    const isFullReturn = totalReturnedQuantity >= totalOrderedQuantity;
+    const returnedAmount = selectedItems.reduce((sum: number, item: any) => sum + Number(item.return_quantity || 0) * Number(item.unit_price || 0), 0);
 
     if (!returnRecord) {
-      const { data: createdReturn, error: createReturnError } =
-        await supabaseAdmin
-          .from("order_returns")
-          .insert({
-            order_id: order.id,
-            store_id: order.store_id,
-            order_code: order.order_code,
-            mayar_code: order.mayar_code || order.mayar_shipment_code || null,
-            return_reason: reason || null,
-            inventory_restored: false,
-            financial_reversed: false,
-          })
-          .select("*")
-          .single();
-
-      if (createReturnError) {
-        throw new Error(
-          "خطأ في إنشاء سجل الاسترجاع: " + createReturnError.message
-        );
-      }
-
+      const { data: createdReturn, error: createReturnError } = await supabaseAdmin.from("order_returns").insert({
+        order_id: order.id, store_id: order.store_id, order_code: order.order_code,
+        mayar_code: order.mayar_code || order.mayar_shipment_code || null,
+        return_reason: reason || (isFullReturn ? "استرجاع كامل" : "استرجاع جزئي"),
+        inventory_restored: false, financial_reversed: false,
+      }).select("*").single();
+      if (createReturnError) throw new Error("خطأ في إنشاء سجل الاسترجاع: " + createReturnError.message);
       returnRecord = createdReturn;
     }
 
-    if (!returnRecord.inventory_restored) {
-      const grouped = new Map<string, number>();
-
-      for (const item of normalized.items) {
-        grouped.set(
-          item.variant_id,
-          (grouped.get(item.variant_id) || 0) + Number(item.quantity || 0)
-        );
-      }
-
-      for (const [variantId, quantity] of grouped.entries()) {
-        const movementReason = `استرجاع طلب - ${order.order_code}`;
-
-        const { data: existingMovement, error: movementReadError } =
-          await supabaseAdmin
-            .from("inventory_movements")
-            .select("id")
-            .eq("variant_id", variantId)
-            .eq("movement_type", "order_return_restore")
-            .eq("reason", movementReason)
-            .maybeSingle();
-
-        if (movementReadError) {
-          throw new Error(movementReadError.message);
-        }
-
-        if (existingMovement) continue;
-
-        const { data: variant, error: variantError } = await supabaseAdmin
-          .from("product_variants")
-          .select("stock_quantity")
-          .eq("id", variantId)
-          .single();
-
-        if (variantError) {
-          throw new Error("خطأ في قراءة المخزون: " + variantError.message);
-        }
-
-        const beforeQty = Number(variant.stock_quantity || 0);
-        const afterQty = beforeQty + Number(quantity || 0);
-
-        const { error: stockError } = await supabaseAdmin
-          .from("product_variants")
-          .update({
-            stock_quantity: afterQty,
-          })
-          .eq("id", variantId);
-
-        if (stockError) {
-          throw new Error("خطأ في إعادة المخزون: " + stockError.message);
-        }
-
-        const { error: movementError } = await supabaseAdmin
-          .from("inventory_movements")
-          .insert({
-            variant_id: variantId,
-            movement_type: "order_return_restore",
-            quantity_change: Number(quantity || 0),
-            quantity_before: beforeQty,
-            quantity_after: afterQty,
-            reason: movementReason,
-          });
-
-        if (movementError) {
-          throw new Error(
-            "تمت إعادة المخزون لكن فشل تسجيل حركة المخزون: " +
-              movementError.message
-          );
-        }
-      }
-
-      const { error: inventoryFlagError } = await supabaseAdmin
-        .from("order_returns")
-        .update({
-          inventory_restored: true,
-        })
-        .eq("id", returnRecord.id);
-
-      if (inventoryFlagError) {
-        throw new Error(inventoryFlagError.message);
-      }
-
-      returnRecord.inventory_restored = true;
+    for (const item of selectedItems) {
+      const quantity = Number(item.return_quantity || 0);
+      const movementReason = `${isFullReturn ? "استرجاع كامل" : "استرجاع جزئي"} - ${order.order_code} - ${item.id}`;
+      const { data: existingMovement, error: movementReadError } = await supabaseAdmin.from("inventory_movements").select("id")
+        .eq("variant_id", item.variant_id).eq("movement_type", "order_return_restore").eq("reason", movementReason).maybeSingle();
+      if (movementReadError) throw new Error(movementReadError.message);
+      if (existingMovement) continue;
+      const { data: variant, error: variantError } = await supabaseAdmin.from("product_variants").select("stock_quantity").eq("id", item.variant_id).single();
+      if (variantError) throw new Error("خطأ في قراءة المخزون: " + variantError.message);
+      const beforeQty = Number(variant.stock_quantity || 0);
+      const afterQty = beforeQty + quantity;
+      const { error: stockError } = await supabaseAdmin.from("product_variants").update({ stock_quantity: afterQty }).eq("id", item.variant_id);
+      if (stockError) throw new Error("خطأ في إعادة المخزون: " + stockError.message);
+      const { error: movementError } = await supabaseAdmin.from("inventory_movements").insert({
+        variant_id: item.variant_id, movement_type: "order_return_restore", quantity_change: quantity,
+        quantity_before: beforeQty, quantity_after: afterQty, reason: movementReason,
+      });
+      if (movementError) throw new Error("تمت إعادة المخزون لكن فشل تسجيل حركة المخزون: " + movementError.message);
     }
 
-    if (!returnRecord.financial_reversed) {
-      const { data: originalTransactions, error: transactionsError } =
-        await supabaseAdmin
-          .from("financial_transactions")
-          .select(`
-            id,
-            transaction_type,
-            direction,
-            category,
-            amount,
-            source_key
-          `)
-          .eq("order_id", order.id)
-          .neq("transaction_type", "return");
-
-      if (transactionsError) {
-        throw new Error(transactionsError.message);
-      }
-
-      for (const transaction of originalTransactions || []) {
-        await insertFinancialReversalIfMissing(transaction, order);
-      }
-
-      const { error: financialFlagError } = await supabaseAdmin
-        .from("order_returns")
-        .update({
-          financial_reversed: true,
-        })
-        .eq("id", returnRecord.id);
-
-      if (financialFlagError) {
-        throw new Error(financialFlagError.message);
-      }
-
-      returnRecord.financial_reversed = true;
+    if (isFullReturn) {
+      const { data: originalTransactions, error: transactionsError } = await supabaseAdmin.from("financial_transactions")
+        .select(`id, transaction_type, direction, category, amount, source_key`).eq("order_id", order.id).neq("transaction_type", "return");
+      if (transactionsError) throw new Error(transactionsError.message);
+      for (const transaction of originalTransactions || []) await insertFinancialReversalIfMissing(transaction, order);
+    } else {
+      await insertPartialReturnTransaction(order, returnedAmount);
     }
+
+    const { error: returnFlagError } = await supabaseAdmin.from("order_returns").update({
+      return_reason: reason || (isFullReturn ? "استرجاع كامل" : "استرجاع جزئي"),
+      inventory_restored: true, financial_reversed: true,
+    }).eq("id", returnRecord.id);
+    if (returnFlagError) throw new Error(returnFlagError.message);
 
     return NextResponse.json({
       ok: true,
-      message: "تم استرجاع الطلب وإعادة المنتجات إلى المخزون",
-      order: normalized,
-      inventory_restored: true,
-      financial_reversed: true,
+      message: isFullReturn ? "تم الاسترجاع الكامل وإعادة المنتجات والمكافأة" : "تم الاسترجاع الجزئي وإعادة القطع المحددة وتعديل الرصيد",
+      order: normalized, is_full_return: isFullReturn, returned_amount: returnedAmount,
+      returned_quantity: totalReturnedQuantity, inventory_restored: true, financial_reversed: true,
     });
   } catch (error: any) {
     return NextResponse.json(
