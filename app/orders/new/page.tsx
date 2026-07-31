@@ -1390,29 +1390,38 @@ export default function NewOrderPage() {
                   هذا الاختيار يُرسل إلى المعيار مباشرة عبر priceTypeCode.
                 </p>
 
-                {mayarShippingIncluded && (
-                  <div className="mt-4">
-                    <label className="mb-2 block text-sm text-neutral-300">
-                      قيمة الشحن التي يتحملها المتجر
-                    </label>
-                    <input
-                      className="w-full rounded-xl bg-neutral-900 p-4"
-                      type="text"
-                      dir="ltr"
-                      inputMode="decimal"
-                      placeholder="مثال: 15"
-                      value={mayarShippingAmount}
-                      onChange={(e) =>
-                        setMayarShippingAmount(
-                          e.target.value.replace(/[^0-9.]/g, "")
-                        )
-                      }
-                    />
-                    <p className="mt-2 text-xs text-yellow-300">
-                      تُخصم هذه القيمة من الرصيد بعد قبول الشحنة وإرجاع كود المعيار.
-                    </p>
-                  </div>
-                )}
+                <div
+                  className={`mt-4 rounded-xl border p-4 ${
+                    mayarShippingIncluded
+                      ? "border-yellow-500 bg-yellow-950/30"
+                      : "border-neutral-700 bg-neutral-950/40"
+                  }`}
+                >
+                  <label className="mb-2 block font-bold text-neutral-200">
+                    قيمة الشحن التي يتحملها المتجر
+                  </label>
+                  <input
+                    className="w-full rounded-xl bg-neutral-900 p-4 disabled:cursor-not-allowed disabled:opacity-40"
+                    type="text"
+                    dir="ltr"
+                    inputMode="decimal"
+                    placeholder={
+                      mayarShippingIncluded
+                        ? "اكتب قيمة الشحن، مثال: 15"
+                        : "فعّل السعر شامل الشحن أولًا"
+                    }
+                    value={mayarShippingAmount}
+                    disabled={!mayarShippingIncluded}
+                    onChange={(e) =>
+                      setMayarShippingAmount(
+                        e.target.value.replace(/[^0-9.]/g, "")
+                      )
+                    }
+                  />
+                  <p className="mt-2 text-xs text-yellow-300">
+                    عند اختيار السعر شامل الشحن تُخصم هذه القيمة من الرصيد بعد قبول الشحنة وإرجاع كود المعيار.
+                  </p>
+                </div>
               </div>
 
               <div>
