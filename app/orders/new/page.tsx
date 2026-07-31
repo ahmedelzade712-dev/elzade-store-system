@@ -18,6 +18,7 @@ export default function NewOrderPage() {
   const [isExchangeOrder, setIsExchangeOrder] = useState(false);
   const [shippingPayer, setShippingPayer] = useState<ShippingPayer>("customer");
   const [mayarShippingIncluded, setMayarShippingIncluded] = useState(false);
+  const [mayarShippingAmount, setMayarShippingAmount] = useState("");
 
   const [customerName, setCustomerName] = useState("");
   const [phone, setPhone] = useState("");
@@ -365,6 +366,7 @@ export default function NewOrderPage() {
       setMayarSentPiecesCount(1);
       setMayarOpenable(true);
       setMayarShippingIncluded(false);
+      setMayarShippingAmount("");
     }
   }, [isMayarShippingSelected]);
 
@@ -663,6 +665,15 @@ export default function NewOrderPage() {
       }
     }
 
+    if (isMayarShippingSelected && mayarShippingIncluded) {
+      const enteredShippingAmount = Number(mayarShippingAmount || 0);
+
+      if (!Number.isFinite(enteredShippingAmount) || enteredShippingAmount <= 0) {
+        setMessage("أدخل قيمة شحن صحيحة عند اختيار السعر شامل الشحن");
+        return;
+      }
+    }
+
     try {
       const response = await fetch("/api/orders/create", {
         method: "POST",
@@ -696,6 +707,10 @@ export default function NewOrderPage() {
           mayarShippingIncluded: isMayarShippingSelected
             ? mayarShippingIncluded
             : false,
+          mayarShippingAmount:
+            isMayarShippingSelected && mayarShippingIncluded
+              ? Number(mayarShippingAmount || 0)
+              : 0,
           exchangeOriginalOrderId: isExchangeOrder
             ? exchangeOriginalOrder?.id || null
             : null,
@@ -772,6 +787,7 @@ export default function NewOrderPage() {
       setIsExchangeOrder(false);
       setShippingPayer("customer");
       setMayarShippingIncluded(false);
+      setMayarShippingAmount("");
       setMayarParcelType("full_delivery");
       setMayarSentPiecesCount(1);
       setMayarReturnPiecesCount(1);
@@ -1371,8 +1387,32 @@ export default function NewOrderPage() {
                   <option value="included">السعر شامل الشحن</option>
                 </select>
                 <p className="mt-2 text-xs text-neutral-400">
-                  هذا الاختيار يُرسل إلى المعيار فقط. لا يغير النظام قيمة الطلب أو يحسب رسوم الشحن.
+                  هذا الاختيار يُرسل إلى المعيار مباشرة عبر priceTypeCode.
                 </p>
+
+                {mayarShippingIncluded && (
+                  <div className="mt-4">
+                    <label className="mb-2 block text-sm text-neutral-300">
+                      قيمة الشحن التي يتحملها المتجر
+                    </label>
+                    <input
+                      className="w-full rounded-xl bg-neutral-900 p-4"
+                      type="text"
+                      dir="ltr"
+                      inputMode="decimal"
+                      placeholder="مثال: 15"
+                      value={mayarShippingAmount}
+                      onChange={(e) =>
+                        setMayarShippingAmount(
+                          e.target.value.replace(/[^0-9.]/g, "")
+                        )
+                      }
+                    />
+                    <p className="mt-2 text-xs text-yellow-300">
+                      تُخصم هذه القيمة من الرصيد بعد قبول الشحنة وإرجاع كود المعيار.
+                    </p>
+                  </div>
+                )}
               </div>
 
               <div>

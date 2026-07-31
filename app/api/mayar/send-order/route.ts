@@ -54,6 +54,40 @@ async function saveMayarFailure(
     .eq("id", orderId);
 }
 
+async function recordIncludedShippingExpense(order: any) {
+  const included = Boolean(order.mayar_shipping_included);
+  const amount = Number(order.mayar_shipping_amount || 0);
+
+  if (!included || amount <= 0) return;
+
+  const { error } = await supabaseAdmin
+    .from("financial_transactions")
+    .insert({
+      store_id: order.store_id,
+      order_id: order.id,
+      transaction_type: "expense",
+      direction: "debit",
+      category: "شحن المعيار شامل السعر",
+      amount,
+      description: `خصم قيمة شحن المعيار للطلب ${order.order_code}`,
+      source_key: `order:${order.id}:mayar_included_shipping`,
+      is_system_generated: true,
+      occurred_at: new Date().toISOString(),
+      metadata: {
+        order_code: order.order_code,
+        mayar_shipping_included: true,
+        mayar_shipping_amount: amount,
+      },
+    });
+
+  if (error && error.code !== "23505") {
+    throw new Error(
+      "تم إنشاء الشحنة في المعيار، لكن فشل تسجيل خصم قيمة الشحن: " +
+        error.message
+    );
+  }
+}
+
 export async function GET(request: Request) {
   let loadedOrderId: string | null = null;
 
@@ -283,6 +317,17 @@ export async function GET(request: Request) {
         ? true
         : Boolean(order.mayar_openable);
 
+    const shippingIncluded = Boolean(order.mayar_shipping_included);
+    const includedShippingAmount = shippingIncluded
+      ? Number(order.mayar_shipping_amount || 0)
+      : 0;
+
+    if (shippingIncluded && includedShippingAmount <= 0) {
+      throw new Error(
+        "الطلب محدد كسعر شامل الشحن، لكن قيمة الشحن غير موجودة أو غير صحيحة"
+      );
+    }
+
     const login = await mayarLogin();
 
     const shipment = await mayarSaveShipment(
@@ -310,6 +355,7 @@ export async function GET(request: Request) {
           ? returnPiecesCount
           : undefined,
         openable,
+        shippingIncluded,
         notes: `Elzade ${order.order_code}${
           isExchange ? " - طرد مقابل طرد" : ""
         }${notes ? " - " + notes : ""}`,
@@ -364,6 +410,8 @@ export async function GET(request: Request) {
       );
     }
 
+    await recordIncludedShippingExpense(order);
+
     return NextResponse.json({
       ok: true,
       message:
@@ -388,6 +436,9 @@ export async function GET(request: Request) {
         ? 0
         : totalAmount,
       system_total_amount: totalAmount,
+      price_type: shippingIncluded ? "INCLD" : "EXCLD",
+      shipping_included: shippingIncluded,
+      included_shipping_amount: includedShippingAmount,
       shipment,
     });
   } catch (error: any) {

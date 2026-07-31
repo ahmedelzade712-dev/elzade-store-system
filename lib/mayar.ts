@@ -42,6 +42,7 @@ export type MayarShipmentInput = {
   returnPiecesCount?: number;
   parcelType?: "full_delivery" | "exchange";
   openable?: boolean;
+  shippingIncluded?: boolean;
   notes?: string;
 };
 
@@ -342,7 +343,8 @@ export async function mayarSaveShipment(
     openableCode:
       shipmentInput.openable === false ? "N" : "Y",
     paymentTypeCode: "COLC",
-    priceTypeCode: "EXCLD",
+    priceTypeCode:
+      shipmentInput.shippingIncluded === true ? "INCLD" : "EXCLD",
     price: isExchange
       ? 0
       : Number(shipmentInput.price || 0),

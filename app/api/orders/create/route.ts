@@ -119,6 +119,10 @@ export async function POST(request: Request) {
       Math.trunc(asNumber(body.mayarReturnPiecesCount, 0))
     );
     const mayarOpenable = Boolean(body.mayarOpenable);
+    const mayarShippingIncluded = Boolean(body.mayarShippingIncluded);
+    const mayarShippingAmount = mayarShippingIncluded
+      ? Math.max(0, asNumber(body.mayarShippingAmount))
+      : 0;
     const exchangeOriginalOrderId = asText(body.exchangeOriginalOrderId) || null;
     const exchangeReturnSelections =
       body.exchangeReturnSelections &&
@@ -167,6 +171,10 @@ export async function POST(request: Request) {
 
     if (isMayar && (!city?.mayar_zone_id || !destination.mayar_subzone_id)) {
       throw new Error("المدينة أو المنطقة غير مرتبطة ببيانات المعيار");
+    }
+
+    if (isMayar && mayarShippingIncluded && mayarShippingAmount <= 0) {
+      throw new Error("يجب إدخال قيمة الشحن عند اختيار السعر شامل الشحن");
     }
 
     if (isTrialOrder && !isPrivateTripoli) {
@@ -444,6 +452,9 @@ export async function POST(request: Request) {
               ? mayarReturnPiecesCount
               : 0,
           mayar_openable: isMayar ? mayarOpenable : true,
+          mayar_shipping_included: isMayar ? mayarShippingIncluded : false,
+          mayar_shipping_amount:
+            isMayar && mayarShippingIncluded ? mayarShippingAmount : 0,
           exchange_original_order_id: isExchange
             ? exchangeOriginalOrderId
             : null,
@@ -577,6 +588,9 @@ export async function POST(request: Request) {
       shipping_payer: isExchange ? shippingPayer : null,
       exchange_shipping_deduction: exchangeStoreShippingFee,
       exchange_courier_reward_deduction: exchangeCourierReward,
+      mayar_shipping_included: isMayar ? mayarShippingIncluded : false,
+      mayar_shipping_amount:
+        isMayar && mayarShippingIncluded ? mayarShippingAmount : 0,
       deducted_items_count: normalizedCart.reduce(
         (sum: number, item: NormalizedCartItem) => sum + item.quantity,
         0
