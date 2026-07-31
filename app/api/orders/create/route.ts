@@ -105,6 +105,8 @@ export async function POST(request: Request) {
     const isScheduled = Boolean(body.isScheduled);
     const scheduledFor = asText(body.scheduledFor) || null;
     const isTrialOrder = Boolean(body.isTrialOrder);
+    const shippingPayer =
+      body.shippingPayer === "store" ? "store" : "customer";
     const shippingFee = Math.max(0, asNumber(body.shippingFee));
     const mayarParcelType =
       body.mayarParcelType === "exchange" ? "exchange" : "full_delivery";
@@ -165,10 +167,6 @@ export async function POST(request: Request) {
 
     if (isMayar && (!city?.mayar_zone_id || !destination.mayar_subzone_id)) {
       throw new Error("المدينة أو المنطقة غير مرتبطة ببيانات المعيار");
-    }
-
-    if (!isMayar && mayarParcelType === "exchange") {
-      throw new Error("طرد مقابل طرد متاح فقط لطلبات المعيار");
     }
 
     if (isTrialOrder && !isPrivateTripoli) {
@@ -255,7 +253,7 @@ export async function POST(request: Request) {
 
     let exchangeRows: ExchangeReturnRow[] = [];
 
-    if (isMayar && mayarParcelType === "exchange") {
+    if (mayarParcelType === "exchange") {
       if (!exchangeOriginalOrderId) {
         throw new Error("يجب اختيار الطلب الأصلي للاستبدال");
       }
@@ -407,6 +405,12 @@ export async function POST(request: Request) {
 
     createdCustomerId = customer.id;
 
+    const isExchange = mayarParcelType === "exchange";
+    const exchangeStoreShippingFee =
+      isExchange && shippingPayer === "store" ? 15 : 0;
+    const exchangeCourierReward =
+      isExchange && shippingPayer === "store" ? 5 : 0;
+
     let orderCode = "";
     let order: any = null;
 
@@ -426,10 +430,13 @@ export async function POST(request: Request) {
             isTrialOrder && isPrivateTripoli
               ? new Date(Date.now() + 10 * 60 * 60 * 1000).toISOString()
               : null,
-          total_amount:
-            isMayar && mayarParcelType === "exchange" ? 0 : totalAmount,
-          total_cost: totalCost,
-          shipping_fee: isPrivateTripoli ? shippingFee : 0,
+          total_amount: isExchange ? 0 : totalAmount,
+          total_cost: isExchange ? 0 : totalCost,
+          shipping_fee: isExchange
+            ? exchangeStoreShippingFee
+            : isPrivateTripoli
+              ? shippingFee
+              : 0,
           mayar_parcel_type: isMayar ? mayarParcelType : "full_delivery",
           mayar_sent_pieces_count: isMayar ? mayarSentPiecesCount : 1,
           mayar_return_pieces_count:
@@ -437,10 +444,9 @@ export async function POST(request: Request) {
               ? mayarReturnPiecesCount
               : 0,
           mayar_openable: isMayar ? mayarOpenable : true,
-          exchange_original_order_id:
-            isMayar && mayarParcelType === "exchange"
-              ? exchangeOriginalOrderId
-              : null,
+          exchange_original_order_id: isExchange
+            ? exchangeOriginalOrderId
+            : null,
           exchange_return_received: false,
           scheduled_for: isScheduled ? scheduledFor : null,
           notes,
@@ -469,8 +475,7 @@ export async function POST(request: Request) {
       order_id: order.id,
       variant_id: item.variantId,
       quantity: item.quantity,
-      unit_price:
-        isMayar && mayarParcelType === "exchange" ? 0 : item.salePrice,
+      unit_price: isExchange ? 0 : item.salePrice,
       unit_cost: item.costPrice,
       is_trial_item: isTrialOrder && isPrivateTripoli,
       trial_group_key:
@@ -543,17 +548,13 @@ export async function POST(request: Request) {
         .from("inventory_movements")
         .insert({
           variant_id: item.variantId,
-          movement_type:
-            isMayar && mayarParcelType === "exchange"
-              ? "exchange_new_item"
-              : "sale",
+          movement_type: isExchange ? "exchange_new_item" : "sale",
           quantity_change: -item.quantity,
           quantity_before: beforeQty,
           quantity_after: afterQty,
-          reason:
-            isMayar && mayarParcelType === "exchange"
-              ? `استبدال - إرسال الجديد ${order.order_code}`
-              : `بيع - ${order.order_code}`,
+          reason: isExchange
+            ? `استبدال - إرسال الجديد ${order.order_code}`
+            : `بيع - ${order.order_code}`,
         })
         .select("id")
         .single();
@@ -572,7 +573,10 @@ export async function POST(request: Request) {
         order_code: order.order_code,
       },
       is_mayar: isMayar,
-      is_exchange: isMayar && mayarParcelType === "exchange",
+      is_exchange: isExchange,
+      shipping_payer: isExchange ? shippingPayer : null,
+      exchange_shipping_deduction: exchangeStoreShippingFee,
+      exchange_courier_reward_deduction: exchangeCourierReward,
       deducted_items_count: normalizedCart.reduce(
         (sum: number, item: NormalizedCartItem) => sum + item.quantity,
         0

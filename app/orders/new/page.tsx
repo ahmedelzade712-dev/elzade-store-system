@@ -13,6 +13,12 @@ export default function NewOrderPage() {
   const [message, setMessage] = useState("");
   const [mounted, setMounted] = useState(false);
 
+  type ShippingPayer = "customer" | "store";
+
+  const [isExchangeOrder, setIsExchangeOrder] = useState(false);
+  const [shippingPayer, setShippingPayer] = useState<ShippingPayer>("customer");
+  const [mayarShippingIncluded, setMayarShippingIncluded] = useState(false);
+
   const [customerName, setCustomerName] = useState("");
   const [phone, setPhone] = useState("");
   const [phone2, setPhone2] = useState("");
@@ -36,7 +42,6 @@ export default function NewOrderPage() {
   const [scheduledFor, setScheduledFor] = useState("");
   const [shippingFeeInput, setShippingFeeInput] = useState("0");
   const [shippingFeeTouched, setShippingFeeTouched] = useState(false);
-  const [isTrialOrder, setIsTrialOrder] = useState(false);
   const [mayarParcelType, setMayarParcelType] = useState<"full_delivery" | "exchange">("full_delivery");
   const [mayarSentPiecesCount, setMayarSentPiecesCount] = useState(1);
   const [mayarReturnPiecesCount, setMayarReturnPiecesCount] = useState(1);
@@ -45,6 +50,7 @@ export default function NewOrderPage() {
   const [exchangeOriginalOrder, setExchangeOriginalOrder] = useState<any>(null);
   const [exchangeReturnSelections, setExchangeReturnSelections] = useState<Record<string, number>>({});
   const [exchangeLookupLoading, setExchangeLookupLoading] = useState(false);
+
 
   function sortCitiesByPriority(citiesList: any[]) {
     function normalizeCityName(name: string) {
@@ -324,39 +330,13 @@ export default function NewOrderPage() {
     }
   }, [cityId, areaId, defaultShippingFee, shippingFeeTouched]);
 
-  function getTrialGroupKey(item: any) {
-    return `${item.product_id}-${item.color}`;
-  }
+  const cartProductsTotal = cart.reduce(
+    (sum, item) => sum + item.quantity * Number(item.sale_price || 0),
+    0
+  );
 
-  function calculateTrialGroupedTotal(priceField: "sale_price" | "cost_price") {
-    const groups = new Map<string, number>();
-
-    cart.forEach((item) => {
-      const groupKey = getTrialGroupKey(item);
-      const currentPrice = Number(groups.get(groupKey) || 0);
-      const itemPrice = Number(item[priceField] || 0);
-
-      groups.set(groupKey, Math.max(currentPrice, itemPrice));
-    });
-
-    return Array.from(groups.values()).reduce((sum, price) => sum + price, 0);
-  }
-
-  const totalAmount =
-    isTrialOrder && isPrivateTripoliSelected()
-      ? calculateTrialGroupedTotal("sale_price")
-      : cart.reduce(
-          (sum, item) => sum + item.quantity * Number(item.sale_price || 0),
-          0
-        );
-
-  const totalCost =
-    isTrialOrder && isPrivateTripoliSelected()
-      ? calculateTrialGroupedTotal("cost_price")
-      : cart.reduce(
-          (sum, item) => sum + item.quantity * Number(item.cost_price || 0),
-          0
-        );
+  // طلب الاستبدال لا ينشئ حركة مالية للمنتجات.
+  const totalAmount = isExchangeOrder ? 0 : cartProductsTotal;
 
   function getStoreLetter(storeName: string) {
     const normalized = (storeName || "").toLowerCase();
@@ -369,17 +349,22 @@ export default function NewOrderPage() {
   }
 
   useEffect(() => {
-    if (!isPrivateTripoliSelected() && isTrialOrder) {
-      setIsTrialOrder(false);
+    setMayarParcelType(isExchangeOrder ? "exchange" : "full_delivery");
+
+    if (!isExchangeOrder) {
+      setExchangeOriginalCode("");
+      setExchangeOriginalOrder(null);
+      setExchangeReturnSelections({});
+      setMayarReturnPiecesCount(1);
+      setShippingPayer("customer");
     }
-  }, [cityId, isTrialOrder]);
+  }, [isExchangeOrder]);
 
   useEffect(() => {
     if (!isMayarShippingSelected) {
-      setMayarParcelType("full_delivery");
       setMayarSentPiecesCount(1);
-      setMayarReturnPiecesCount(1);
       setMayarOpenable(true);
+      setMayarShippingIncluded(false);
     }
   }, [isMayarShippingSelected]);
 
@@ -610,9 +595,20 @@ export default function NewOrderPage() {
       return;
     }
 
-    if (isTrialOrder && !isPrivateTripoliSelected()) {
-      setMessage("طلب التجربة مسموح فقط لطلبات طرابلس (خاصة)");
-      return;
+    if (isExchangeOrder) {
+      if (!exchangeOriginalOrder) {
+        setMessage("ابحث عن الطلب الأصلي واختر القطع المستبدلة أولاً");
+        return;
+      }
+
+      const selectedReturnQuantity = Object.values(
+        exchangeReturnSelections
+      ).reduce<number>((sum, value) => sum + Number(value || 0), 0);
+
+      if (selectedReturnQuantity < 1) {
+        setMessage("اختر قطعة واحدة على الأقل ستعود من الطلب الأصلي");
+        return;
+      }
     }
 
     if (!cityId) {
@@ -653,20 +649,10 @@ export default function NewOrderPage() {
         return;
       }
 
-      if (mayarParcelType === "exchange") {
-        if (!exchangeOriginalOrder) {
-          setMessage("ابحث عن الطلب الأصلي واختر القطع المستبدلة أولاً");
-          return;
-        }
-
+      if (isExchangeOrder) {
         const selectedReturnQuantity = Object.values(
           exchangeReturnSelections
-        ).reduce((sum, value) => sum + Number(value || 0), 0);
-
-        if (selectedReturnQuantity < 1) {
-          setMessage("اختر قطعة واحدة على الأقل ستعود من الطلب الأصلي");
-          return;
-        }
+        ).reduce<number>((sum, value) => sum + Number(value || 0), 0);
 
         if (selectedReturnQuantity !== Number(mayarReturnPiecesCount || 0)) {
           setMessage(
@@ -697,17 +683,25 @@ export default function NewOrderPage() {
           createdBy: profile.id,
           isScheduled,
           scheduledFor,
-          isTrialOrder: isTrialOrder && isPrivateTripoliSelected(),
+          orderType: isExchangeOrder ? "exchange" : "normal",
+          isTrialOrder: false,
+          isSelectionOrder: false,
+          selectionIntendedQuantity: null,
+          shippingPayer: isExchangeOrder ? shippingPayer : null,
           shippingFee,
-          mayarParcelType,
+          mayarParcelType: isExchangeOrder ? "exchange" : "full_delivery",
           mayarSentPiecesCount,
           mayarReturnPiecesCount,
           mayarOpenable,
-          exchangeOriginalOrderId:
-            isMayarShippingSelected && mayarParcelType === "exchange"
-              ? exchangeOriginalOrder?.id || null
-              : null,
-          exchangeReturnSelections,
+          mayarShippingIncluded: isMayarShippingSelected
+            ? mayarShippingIncluded
+            : false,
+          exchangeOriginalOrderId: isExchangeOrder
+            ? exchangeOriginalOrder?.id || null
+            : null,
+          exchangeReturnSelections: isExchangeOrder
+            ? exchangeReturnSelections
+            : {},
           cart,
         }),
       });
@@ -775,7 +769,9 @@ export default function NewOrderPage() {
       setScheduledFor("");
       setShippingFeeInput("0");
       setShippingFeeTouched(false);
-      setIsTrialOrder(false);
+      setIsExchangeOrder(false);
+      setShippingPayer("customer");
+      setMayarShippingIncluded(false);
       setMayarParcelType("full_delivery");
       setMayarSentPiecesCount(1);
       setMayarReturnPiecesCount(1);
@@ -834,6 +830,25 @@ export default function NewOrderPage() {
       </div>
 
       <form onSubmit={handleSubmit} className="grid gap-8">
+        <section className="max-w-5xl rounded-2xl border border-neutral-800 bg-neutral-900 p-6">
+          <label className="flex cursor-pointer items-center gap-3">
+            <input
+              type="checkbox"
+              checked={isExchangeOrder}
+              onChange={(e) => {
+                setIsExchangeOrder(e.target.checked);
+                setMessage("");
+              }}
+              className="h-5 w-5"
+            />
+            <span className="text-lg font-bold">طلب استبدال</span>
+          </label>
+
+          <p className="mt-2 text-sm text-neutral-400">
+            اترك الخيار بدون علامة ليكون الطلب بيعًا عاديًا.
+          </p>
+        </section>
+
         <section className="grid max-w-5xl grid-cols-1 gap-4 md:grid-cols-2">
           <input
             className="w-full rounded-xl bg-neutral-900 p-4"
@@ -993,26 +1008,6 @@ export default function NewOrderPage() {
             </div>
           )}
 
-          {isPrivateTripoliSelected() && (
-            <label className="flex items-center gap-3 rounded-xl bg-neutral-900 p-4">
-              <input
-                type="checkbox"
-                checked={isTrialOrder}
-                onChange={(e) => setIsTrialOrder(e.target.checked)}
-              />
-              <span className="font-bold">طلب تجربة</span>
-              <span className="text-sm text-neutral-400">
-                يسمح بأكثر من مقاس/لون ويحسب سعر قطعة واحدة لكل لون
-              </span>
-            </label>
-          )}
-
-          {isTrialOrder && isPrivateTripoliSelected() && (
-            <div className="rounded-xl border border-yellow-600 bg-yellow-950/40 p-4 text-sm text-yellow-100 md:col-span-2">
-              تنبيه: سيتم خصم كل القطع المرسلة من المخزون مؤقتًا. بعد رجوع المنذوب افتح صفحة طلبات التجربة واختر القطع التي أخذها الزبون حتى يرجع النظام باقي المقاسات للمخزون.
-            </div>
-          )}
-
           <input
             className="rounded-xl bg-neutral-900 p-4 md:col-span-2"
             placeholder="العنوان التفصيلي"
@@ -1054,6 +1049,130 @@ export default function NewOrderPage() {
             ))}
           </select>
         </section>
+
+        {isExchangeOrder && (
+          <section className="max-w-5xl rounded-2xl border border-yellow-600 bg-yellow-950/30 p-6">
+            <div className="mb-5">
+              <h2 className="text-xl font-bold text-yellow-100">الطلب الأصلي والقطع الراجعة</h2>
+              <p className="mt-1 text-sm text-yellow-200/80">
+                ابحث عن الطلب الأصلي، ثم حدد الكمية التي ستعود من كل قطعة. المنتجات الجديدة تُضاف من قسم المنتجات بالأسفل.
+              </p>
+            </div>
+
+            {!storeId ? (
+              <div className="rounded-xl bg-neutral-900 p-4 text-neutral-400">
+                اختر المتجر أولاً حتى تتمكن من البحث عن الطلب الأصلي.
+              </div>
+            ) : (
+              <div className="grid gap-4">
+                <div className="grid gap-3 md:grid-cols-[1fr_auto]">
+                  <input
+                    className="rounded-xl bg-neutral-900 p-4"
+                    dir="ltr"
+                    placeholder="كود الطلب الأصلي مثل A011"
+                    value={exchangeOriginalCode}
+                    onChange={(event) => {
+                      setExchangeOriginalCode(event.target.value);
+                      setExchangeOriginalOrder(null);
+                      setExchangeReturnSelections({});
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={lookupExchangeOriginalOrder}
+                    disabled={exchangeLookupLoading}
+                    className="rounded-xl bg-yellow-500 px-5 py-4 font-bold text-black disabled:opacity-50"
+                  >
+                    {exchangeLookupLoading ? "جاري البحث..." : "بحث عن الطلب"}
+                  </button>
+                </div>
+
+                {exchangeOriginalOrder && (
+                  <div className="grid gap-3">
+                    <div className="rounded-xl bg-neutral-900 p-4">
+                      <p className="font-bold">
+                        الطلب: <span dir="ltr">{exchangeOriginalOrder.order_code}</span>
+                      </p>
+                      <p className="text-sm text-neutral-400">
+                        العميل: {exchangeOriginalOrder.customers?.name || "-"} — الهاتف: {exchangeOriginalOrder.customers?.phone || "-"}
+                      </p>
+                    </div>
+
+                    {(exchangeOriginalOrder.order_items || []).map((originalItem: any) => {
+                      const variant = originalItem.product_variants;
+                      const product = variant?.products;
+
+                      return (
+                        <div
+                          key={originalItem.id}
+                          className="grid items-center gap-3 rounded-xl bg-neutral-900 p-4 md:grid-cols-[1fr_150px]"
+                        >
+                          <div>
+                            <p className="font-bold">{product?.name || "-"}</p>
+                            <p className="text-sm text-neutral-400">
+                              {product?.model || "-"} / {variant?.color || "-"} / المقاس {variant?.size || "-"}
+                            </p>
+                            <p className="text-xs text-neutral-500">الكمية الأصلية: {originalItem.quantity}</p>
+                          </div>
+
+                          <div>
+                            <label className="mb-1 block text-xs text-neutral-400">الكمية الراجعة</label>
+                            <input
+                              type="text"
+                              inputMode="numeric"
+                              dir="ltr"
+                              className="w-full rounded-lg bg-neutral-800 p-3 text-left"
+                              value={exchangeReturnSelections[originalItem.id] || 0}
+                              onChange={(event) =>
+                                updateExchangeReturnQuantity(
+                                  originalItem.id,
+                                  Number(originalItem.quantity || 0),
+                                  event.target.value
+                                )
+                              }
+                            />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                <div className="grid gap-3 rounded-xl border border-neutral-700 bg-neutral-900 p-4 md:grid-cols-2">
+                  <button
+                    type="button"
+                    onClick={() => setShippingPayer("customer")}
+                    className={`rounded-xl border p-4 text-right ${
+                      shippingPayer === "customer"
+                        ? "border-white bg-white text-black"
+                        : "border-neutral-700 bg-neutral-950"
+                    }`}
+                  >
+                    <p className="font-bold">الزبونة تتحمل الشحن</p>
+                    <p className={`mt-1 text-xs ${shippingPayer === "customer" ? "text-neutral-700" : "text-neutral-400"}`}>
+                      لا تُخصم مكافأة المندوب من رصيد المتجر في طرابلس الخاصة.
+                    </p>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setShippingPayer("store")}
+                    className={`rounded-xl border p-4 text-right ${
+                      shippingPayer === "store"
+                        ? "border-white bg-white text-black"
+                        : "border-neutral-700 bg-neutral-950"
+                    }`}
+                  >
+                    <p className="font-bold">المتجر يتحمل الشحن</p>
+                    <p className={`mt-1 text-xs ${shippingPayer === "store" ? "text-neutral-700" : "text-neutral-400"}`}>
+                      يطبق النظام خصم الشحن والمكافأة وفق قواعد طرابلس الخاصة.
+                    </p>
+                  </button>
+                </div>
+              </div>
+            )}
+          </section>
+        )}
 
         {storeId && (
           <section>
@@ -1155,7 +1274,12 @@ export default function NewOrderPage() {
 
         {cart.length > 0 && (
           <section className="max-w-5xl rounded-2xl border border-neutral-800 bg-neutral-900 p-6">
-            <h2 className="mb-4 text-xl font-bold">المنتجات داخل الطلب</h2>
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <h2 className="text-xl font-bold">المنتجات داخل الطلب</h2>
+              <span className="rounded-lg bg-neutral-800 px-3 py-2 text-sm font-bold">
+                نوع الطلب: {isExchangeOrder ? "استبدال" : "بيع عادي"}
+              </span>
+            </div>
 
             <div className="grid gap-3">
               {cart.map((item) => (
@@ -1199,7 +1323,9 @@ export default function NewOrderPage() {
 
                   <div className="flex items-center gap-4">
                     <p className="font-bold">
-                      {item.quantity * Number(item.sale_price)} د.ل
+                      {isExchangeOrder
+                        ? "0 د.ل"
+                        : `${item.quantity * Number(item.sale_price)} د.ل`}
                     </p>
 
                     <button
@@ -1215,7 +1341,12 @@ export default function NewOrderPage() {
             </div>
 
             <div className="mt-6 border-t border-neutral-700 pt-4 text-xl font-bold">
-              الإجمالي: {totalAmount} د.ل
+              إجمالي المنتجات: {totalAmount} د.ل
+              {isExchangeOrder && (
+                <p className="mt-2 text-sm font-normal text-emerald-400">
+                  لا توجد حركة مالية للمنتجات في طلب الاستبدال.
+                </p>
+              )}
             </div>
           </section>
         )}
@@ -1227,24 +1358,21 @@ export default function NewOrderPage() {
             <div className="grid gap-4 md:grid-cols-2">
               <div>
                 <label className="mb-2 block text-sm text-neutral-300">
-                  نوع الطرد
+                  السعر بالنسبة لشركة المعيار
                 </label>
                 <select
                   className="w-full rounded-xl bg-neutral-900 p-4"
-                  value={mayarParcelType}
-                  onChange={(e) => {
-                    const value = e.target.value as "full_delivery" | "exchange";
-
-                    setMayarParcelType(value);
-
-                    if (value === "full_delivery") {
-                      setMayarReturnPiecesCount(1);
-                    }
-                  }}
+                  value={mayarShippingIncluded ? "included" : "excluded"}
+                  onChange={(e) =>
+                    setMayarShippingIncluded(e.target.value === "included")
+                  }
                 >
-                  <option value="full_delivery">تسليم كامل الطرد</option>
-                  <option value="exchange">طرد مقابل طرد</option>
+                  <option value="excluded">السعر غير شامل الشحن</option>
+                  <option value="included">السعر شامل الشحن</option>
                 </select>
+                <p className="mt-2 text-xs text-neutral-400">
+                  هذا الاختيار يُرسل إلى المعيار فقط. لا يغير النظام قيمة الطلب أو يحسب رسوم الشحن.
+                </p>
               </div>
 
               <div>
@@ -1279,7 +1407,7 @@ export default function NewOrderPage() {
                 />
               </div>
 
-              {mayarParcelType === "exchange" && (
+              {isExchangeOrder && (
                 <div>
                   <label className="mb-2 block text-sm text-neutral-300">
                     عدد القطع المسترجعة من الزبون
@@ -1300,89 +1428,6 @@ export default function NewOrderPage() {
               )}
             </div>
 
-            {mayarParcelType === "exchange" && (
-              <div className="mt-5 grid gap-4 rounded-xl border border-yellow-600 bg-yellow-950/40 p-5">
-                <div>
-                  <h3 className="font-bold text-yellow-100">بيانات الطلب الأصلي المستبدل</h3>
-                  <p className="mt-1 text-sm text-yellow-200/80">
-                    الاستبدال لا يغيّر الرصيد. القطعة الجديدة تخصم الآن، والقطعة القديمة تعود للمخزون فقط عند إدخال الطلب الأصلي في صفحة المرتجعات.
-                  </p>
-                </div>
-
-                <div className="grid gap-3 md:grid-cols-[1fr_auto]">
-                  <input
-                    className="rounded-xl bg-neutral-900 p-4"
-                    dir="ltr"
-                    placeholder="كود الطلب الأصلي مثل A011"
-                    value={exchangeOriginalCode}
-                    onChange={(event) => {
-                      setExchangeOriginalCode(event.target.value);
-                      setExchangeOriginalOrder(null);
-                      setExchangeReturnSelections({});
-                    }}
-                  />
-                  <button
-                    type="button"
-                    onClick={lookupExchangeOriginalOrder}
-                    disabled={exchangeLookupLoading}
-                    className="rounded-xl bg-yellow-500 px-5 py-4 font-bold text-black disabled:opacity-50"
-                  >
-                    {exchangeLookupLoading ? "جاري البحث..." : "بحث عن الطلب"}
-                  </button>
-                </div>
-
-                {exchangeOriginalOrder && (
-                  <div className="grid gap-3">
-                    <div className="rounded-xl bg-neutral-900 p-4">
-                      <p className="font-bold">
-                        الطلب: <span dir="ltr">{exchangeOriginalOrder.order_code}</span>
-                      </p>
-                      <p className="text-sm text-neutral-400">
-                        العميل: {exchangeOriginalOrder.customers?.name || "-"} — الهاتف: {exchangeOriginalOrder.customers?.phone || "-"}
-                      </p>
-                    </div>
-
-                    {(exchangeOriginalOrder.order_items || []).map((originalItem: any) => {
-                      const variant = originalItem.product_variants;
-                      const product = variant?.products;
-
-                      return (
-                        <div
-                          key={originalItem.id}
-                          className="grid items-center gap-3 rounded-xl bg-neutral-900 p-4 md:grid-cols-[1fr_150px]"
-                        >
-                          <div>
-                            <p className="font-bold">{product?.name || "-"}</p>
-                            <p className="text-sm text-neutral-400">
-                              {product?.model || "-"} / {variant?.color || "-"} / المقاس {variant?.size || "-"}
-                            </p>
-                            <p className="text-xs text-neutral-500">الكمية الأصلية: {originalItem.quantity}</p>
-                          </div>
-
-                          <div>
-                            <label className="mb-1 block text-xs text-neutral-400">الكمية الراجعة</label>
-                            <input
-                              type="text"
-                              inputMode="numeric"
-                              dir="ltr"
-                              className="w-full rounded-lg bg-neutral-800 p-3 text-left"
-                              value={exchangeReturnSelections[originalItem.id] || 0}
-                              onChange={(event) =>
-                                updateExchangeReturnQuantity(
-                                  originalItem.id,
-                                  Number(originalItem.quantity || 0),
-                                  event.target.value
-                                )
-                              }
-                            />
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            )}
           </section>
         )}
 
@@ -1419,7 +1464,7 @@ export default function NewOrderPage() {
         />
 
         <button className="max-w-5xl rounded-xl bg-white p-4 font-bold text-black">
-          حفظ الطلب
+          {isExchangeOrder ? "حفظ طلب الاستبدال" : "حفظ طلب البيع"}
         </button>
 
         {message && <p className="text-red-400">{message}</p>}
