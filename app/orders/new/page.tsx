@@ -1374,6 +1374,27 @@ export default function NewOrderPage() {
             <div className="grid gap-4 md:grid-cols-2">
               <div>
                 <label className="mb-2 block text-sm text-neutral-300">
+                  نوع الطرد
+                </label>
+                <select
+                  className="w-full rounded-xl bg-neutral-900 p-4"
+                  value={isExchangeOrder ? "exchange" : "full_delivery"}
+                  onChange={(e) => {
+                    const exchangeSelected = e.target.value === "exchange";
+                    setIsExchangeOrder(exchangeSelected);
+                    setMessage("");
+                  }}
+                >
+                  <option value="full_delivery">تسليم كامل الطرد</option>
+                  <option value="exchange">طرد مقابل طرد</option>
+                </select>
+                <p className="mt-2 text-xs text-neutral-400">
+                  طرد مقابل طرد يفعّل تلقائيًا منطق الاستبدال والقطع الراجعة.
+                </p>
+              </div>
+
+              <div>
+                <label className="mb-2 block text-sm text-neutral-300">
                   السعر بالنسبة لشركة المعيار
                 </label>
                 <select
