@@ -105,6 +105,10 @@ export async function POST(request: Request) {
     const isScheduled = Boolean(body.isScheduled);
     const scheduledFor = asText(body.scheduledFor) || null;
     const isTrialOrder = Boolean(body.isTrialOrder);
+    const isSelectionOrder = Boolean(body.isSelectionOrder);
+    const selectionIntendedQuantity = isSelectionOrder
+      ? Math.max(1, Math.trunc(asNumber(body.selectionIntendedQuantity, 1)))
+      : 0;
     const shippingPayer =
       body.shippingPayer === "store" ? "store" : "customer";
     const shippingFee = Math.max(0, asNumber(body.shippingFee));
@@ -181,6 +185,10 @@ export async function POST(request: Request) {
       throw new Error("طلب التجربة مسموح فقط لطرابلس الخاصة");
     }
 
+    if (isSelectionOrder && !isPrivateTripoli) {
+      throw new Error("طلب الاختيار مسموح فقط لطرابلس الخاصة");
+    }
+
     const { data: duplicateOrders, error: duplicateError } = await supabaseAdmin
       .from("orders")
       .select("id, order_code, customers!inner(phone)")
@@ -213,6 +221,21 @@ export async function POST(request: Request) {
       if (!item.variantId || item.quantity < 1) {
         throw new Error("توجد قطعة بكمية أو معرّف غير صحيح");
       }
+    }
+
+    const sentItemsQuantity = normalizedCart.reduce(
+      (sum: number, item: NormalizedCartItem) => sum + item.quantity,
+      0
+    );
+
+    if (
+      isSelectionOrder &&
+      (selectionIntendedQuantity < 1 ||
+        selectionIntendedQuantity > sentItemsQuantity)
+    ) {
+      throw new Error(
+        `عدد القطع المتوقع شراؤها (${selectionIntendedQuantity}) يجب أن يكون بين 1 وعدد القطع المرسلة (${sentItemsQuantity})`
+      );
     }
 
     const uniqueVariantIds = [...new Set(normalizedCart.map((item: NormalizedCartItem) => item.variantId))];
@@ -374,19 +397,40 @@ export async function POST(request: Request) {
       );
     }
 
+    function calculateSelectionTotal(
+      field: "salePrice" | "costPrice",
+      requiredQuantity: number
+    ) {
+      let remainingQuantity = Math.max(0, requiredQuantity);
+      let total = 0;
+
+      for (const item of normalizedCart) {
+        if (remainingQuantity <= 0) break;
+        const countedQuantity = Math.min(item.quantity, remainingQuantity);
+        total += countedQuantity * item[field];
+        remainingQuantity -= countedQuantity;
+      }
+
+      return total;
+    }
+
     const totalAmount =
-      isTrialOrder && isPrivateTripoli
-        ? calculateGroupedTrialTotal("salePrice")
-        : normalizedCart.reduce(
+      isSelectionOrder && isPrivateTripoli
+        ? calculateSelectionTotal("salePrice", selectionIntendedQuantity)
+        : isTrialOrder && isPrivateTripoli
+          ? calculateGroupedTrialTotal("salePrice")
+          : normalizedCart.reduce(
             (sum: number, item: NormalizedCartItem) =>
               sum + item.quantity * item.salePrice,
             0
           );
 
     const totalCost =
-      isTrialOrder && isPrivateTripoli
-        ? calculateGroupedTrialTotal("costPrice")
-        : normalizedCart.reduce(
+      isSelectionOrder && isPrivateTripoli
+        ? calculateSelectionTotal("costPrice", selectionIntendedQuantity)
+        : isTrialOrder && isPrivateTripoli
+          ? calculateGroupedTrialTotal("costPrice")
+          : normalizedCart.reduce(
             (sum: number, item: NormalizedCartItem) =>
               sum + item.quantity * item.costPrice,
             0
@@ -432,10 +476,14 @@ export async function POST(request: Request) {
           customer_id: customer.id,
           order_code: orderCode,
           status: "new",
-          is_trial_order: isTrialOrder && isPrivateTripoli,
-          trial_status: isTrialOrder && isPrivateTripoli ? "open" : null,
+          is_trial_order:
+            (isTrialOrder || isSelectionOrder) && isPrivateTripoli,
+          trial_status:
+            (isTrialOrder || isSelectionOrder) && isPrivateTripoli
+              ? "open"
+              : null,
           trial_due_at:
-            isTrialOrder && isPrivateTripoli
+            (isTrialOrder || isSelectionOrder) && isPrivateTripoli
               ? new Date(Date.now() + 10 * 60 * 60 * 1000).toISOString()
               : null,
           total_amount: isExchange ? 0 : totalAmount,
@@ -460,7 +508,11 @@ export async function POST(request: Request) {
             : null,
           exchange_return_received: false,
           scheduled_for: isScheduled ? scheduledFor : null,
-          notes,
+          notes: isSelectionOrder
+            ? [notes, `[طلب اختيار] العدد المتوقع شراؤه: ${selectionIntendedQuantity}`]
+                .filter(Boolean)
+                .join(" - ")
+            : notes,
           created_by: createdBy,
         })
         .select("id, order_code")
@@ -488,9 +540,10 @@ export async function POST(request: Request) {
       quantity: item.quantity,
       unit_price: isExchange ? 0 : item.salePrice,
       unit_cost: item.costPrice,
-      is_trial_item: isTrialOrder && isPrivateTripoli,
+      is_trial_item:
+        (isTrialOrder || isSelectionOrder) && isPrivateTripoli,
       trial_group_key:
-        isTrialOrder && isPrivateTripoli
+        (isTrialOrder || isSelectionOrder) && isPrivateTripoli
           ? `${item.productId}-${item.color}`
           : null,
       trial_kept: false,
@@ -559,13 +612,19 @@ export async function POST(request: Request) {
         .from("inventory_movements")
         .insert({
           variant_id: item.variantId,
-          movement_type: isExchange ? "exchange_new_item" : "sale",
+          movement_type: isExchange
+            ? "exchange_new_item"
+            : isSelectionOrder
+              ? "selection_send"
+              : "sale",
           quantity_change: -item.quantity,
           quantity_before: beforeQty,
           quantity_after: afterQty,
           reason: isExchange
             ? `استبدال - إرسال الجديد ${order.order_code}`
-            : `بيع - ${order.order_code}`,
+            : isSelectionOrder
+              ? `طلب اختيار - إرسال ${sentItemsQuantity} والمتوقع شراء ${selectionIntendedQuantity} - ${order.order_code}`
+              : `بيع - ${order.order_code}`,
         })
         .select("id")
         .single();
@@ -585,6 +644,10 @@ export async function POST(request: Request) {
       },
       is_mayar: isMayar,
       is_exchange: isExchange,
+      is_selection_order: isSelectionOrder,
+      selection_intended_quantity: isSelectionOrder
+        ? selectionIntendedQuantity
+        : null,
       shipping_payer: isExchange ? shippingPayer : null,
       exchange_shipping_deduction: exchangeStoreShippingFee,
       exchange_courier_reward_deduction: exchangeCourierReward,

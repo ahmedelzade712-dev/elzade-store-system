@@ -16,6 +16,8 @@ export default function NewOrderPage() {
   type ShippingPayer = "customer" | "store";
 
   const [isExchangeOrder, setIsExchangeOrder] = useState(false);
+  const [isSelectionOrder, setIsSelectionOrder] = useState(false);
+  const [selectionIntendedQuantity, setSelectionIntendedQuantity] = useState(1);
   const [shippingPayer, setShippingPayer] = useState<ShippingPayer>("customer");
   const [mayarShippingIncluded, setMayarShippingIncluded] = useState(false);
   const [mayarShippingAmount, setMayarShippingAmount] = useState("");
@@ -336,8 +338,29 @@ export default function NewOrderPage() {
     0
   );
 
-  // طلب الاستبدال لا ينشئ حركة مالية للمنتجات.
-  const totalAmount = isExchangeOrder ? 0 : cartProductsTotal;
+  function calculateSelectionTotal(
+    priceField: "sale_price" | "cost_price",
+    requiredQuantity: number
+  ) {
+    let remainingQuantity = Math.max(0, Number(requiredQuantity || 0));
+    let total = 0;
+
+    for (const item of cart) {
+      if (remainingQuantity <= 0) break;
+      const itemQuantity = Math.max(0, Number(item.quantity || 0));
+      const countedQuantity = Math.min(itemQuantity, remainingQuantity);
+      total += countedQuantity * Number(item[priceField] || 0);
+      remainingQuantity -= countedQuantity;
+    }
+
+    return total;
+  }
+
+  const totalAmount = isExchangeOrder
+    ? 0
+    : isSelectionOrder
+      ? calculateSelectionTotal("sale_price", selectionIntendedQuantity)
+      : cartProductsTotal;
 
   function getStoreLetter(storeName: string) {
     const normalized = (storeName || "").toLowerCase();
@@ -369,6 +392,14 @@ export default function NewOrderPage() {
       setMayarShippingAmount("");
     }
   }, [isMayarShippingSelected]);
+
+  useEffect(() => {
+    if (!isPrivateTripoliSelected() && isSelectionOrder) {
+      setIsSelectionOrder(false);
+      setSelectionIntendedQuantity(1);
+    }
+  }, [cityId, isSelectionOrder]);
+
 
 
   async function generateOrderCode() {
@@ -613,6 +644,30 @@ export default function NewOrderPage() {
       }
     }
 
+    if (isSelectionOrder) {
+      if (!isPrivateTripoliSelected()) {
+        setMessage("طلب الاختيار متاح فقط لطلبات طرابلس (خاصة)");
+        return;
+      }
+
+      const sentQuantity = cart.reduce(
+        (sum, item) => sum + Number(item.quantity || 0),
+        0
+      );
+
+      if (selectionIntendedQuantity < 1) {
+        setMessage("حدد عدد القطع التي تنوي الزبونة شراءها");
+        return;
+      }
+
+      if (selectionIntendedQuantity > sentQuantity) {
+        setMessage(
+          `عدد القطع المتوقع شراؤها (${selectionIntendedQuantity}) لا يمكن أن يكون أكبر من عدد القطع المرسلة (${sentQuantity})`
+        );
+        return;
+      }
+    }
+
     if (!cityId) {
       setMessage("يجب اختيار المدينة");
       return;
@@ -694,10 +749,16 @@ export default function NewOrderPage() {
           createdBy: profile.id,
           isScheduled,
           scheduledFor,
-          orderType: isExchangeOrder ? "exchange" : "normal",
+          orderType: isExchangeOrder
+            ? "exchange"
+            : isSelectionOrder
+              ? "selection"
+              : "normal",
           isTrialOrder: false,
-          isSelectionOrder: false,
-          selectionIntendedQuantity: null,
+          isSelectionOrder,
+          selectionIntendedQuantity: isSelectionOrder
+            ? selectionIntendedQuantity
+            : null,
           shippingPayer: isExchangeOrder ? shippingPayer : null,
           shippingFee,
           mayarParcelType: isExchangeOrder ? "exchange" : "full_delivery",
@@ -785,6 +846,8 @@ export default function NewOrderPage() {
       setShippingFeeInput("0");
       setShippingFeeTouched(false);
       setIsExchangeOrder(false);
+      setIsSelectionOrder(false);
+      setSelectionIntendedQuantity(1);
       setShippingPayer("customer");
       setMayarShippingIncluded(false);
       setMayarShippingAmount("");
@@ -847,21 +910,44 @@ export default function NewOrderPage() {
 
       <form onSubmit={handleSubmit} className="grid gap-8">
         <section className="max-w-5xl rounded-2xl border border-neutral-800 bg-neutral-900 p-6">
-          <label className="flex cursor-pointer items-center gap-3">
-            <input
-              type="checkbox"
-              checked={isExchangeOrder}
-              onChange={(e) => {
-                setIsExchangeOrder(e.target.checked);
-                setMessage("");
-              }}
-              className="h-5 w-5"
-            />
-            <span className="text-lg font-bold">طلب استبدال</span>
-          </label>
+          <div className="grid gap-4 md:grid-cols-2">
+            <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-neutral-700 p-4">
+              <input
+                type="checkbox"
+                checked={isExchangeOrder}
+                onChange={(e) => {
+                  setIsExchangeOrder(e.target.checked);
+                  if (e.target.checked) {
+                    setIsSelectionOrder(false);
+                    setSelectionIntendedQuantity(1);
+                  }
+                  setMessage("");
+                }}
+                className="h-5 w-5"
+              />
+              <span className="text-lg font-bold">طلب استبدال</span>
+            </label>
 
-          <p className="mt-2 text-sm text-neutral-400">
-            اترك الخيار بدون علامة ليكون الطلب بيعًا عاديًا.
+            {isPrivateTripoliSelected() && (
+              <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-purple-700 bg-purple-950/20 p-4">
+                <input
+                  type="checkbox"
+                  checked={isSelectionOrder}
+                  onChange={(e) => {
+                    setIsSelectionOrder(e.target.checked);
+                    if (e.target.checked) setIsExchangeOrder(false);
+                    if (!e.target.checked) setSelectionIntendedQuantity(1);
+                    setMessage("");
+                  }}
+                  className="h-5 w-5"
+                />
+                <span className="text-lg font-bold">طلب اختيار</span>
+              </label>
+            )}
+          </div>
+
+          <p className="mt-3 text-sm text-neutral-400">
+            بدون علامة يكون الطلب بيعًا عاديًا. طلب الاختيار يظهر فقط عند تحديد طرابلس (خاصة).
           </p>
         </section>
 
@@ -1021,6 +1107,35 @@ export default function NewOrderPage() {
                 }}
               />
 
+            </div>
+          )}
+
+          {isSelectionOrder && isPrivateTripoliSelected() && (
+            <div className="grid gap-3 rounded-xl border border-purple-700 bg-purple-950/30 p-4 md:col-span-2 md:grid-cols-[1fr_220px] md:items-center">
+              <div>
+                <p className="font-bold text-purple-100">طلب اختيار</p>
+                <p className="mt-1 text-sm text-purple-200/80">
+                  أضف جميع القطع التي ستُرسل، ثم حدد عدد القطع المتوقع أن تشتريها الزبونة. بعد رجوع المندوب تُحدد القطع المباعة وتعود البقية للمخزون.
+                </p>
+              </div>
+
+              <div>
+                <label className="mb-2 block text-sm text-neutral-300">
+                  عدد القطع المتوقع شراؤها
+                </label>
+                <input
+                  className="w-full rounded-xl bg-neutral-900 p-4"
+                  type="text"
+                  dir="ltr"
+                  inputMode="numeric"
+                  value={selectionIntendedQuantity}
+                  onChange={(e) =>
+                    setSelectionIntendedQuantity(
+                      Math.max(1, Number(e.target.value.replace(/\D/g, "") || 1))
+                    )
+                  }
+                />
+              </div>
             </div>
           )}
 
@@ -1293,7 +1408,7 @@ export default function NewOrderPage() {
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
               <h2 className="text-xl font-bold">المنتجات داخل الطلب</h2>
               <span className="rounded-lg bg-neutral-800 px-3 py-2 text-sm font-bold">
-                نوع الطلب: {isExchangeOrder ? "استبدال" : "بيع عادي"}
+                نوع الطلب: {isExchangeOrder ? "استبدال" : isSelectionOrder ? "اختيار" : "بيع عادي"}
               </span>
             </div>
 
@@ -1361,6 +1476,11 @@ export default function NewOrderPage() {
               {isExchangeOrder && (
                 <p className="mt-2 text-sm font-normal text-emerald-400">
                   لا توجد حركة مالية للمنتجات في طلب الاستبدال.
+                </p>
+              )}
+              {isSelectionOrder && (
+                <p className="mt-2 text-sm font-normal text-purple-300">
+                  الإجمالي محسوب على عدد القطع المتوقع شراؤها: {selectionIntendedQuantity}.
                 </p>
               )}
             </div>
