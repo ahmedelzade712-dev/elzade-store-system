@@ -364,7 +364,7 @@ export async function POST(request: Request) {
         throw new Error("اختر قطعة واحدة على الأقل ستعود من الطلب الأصلي");
       }
 
-      if (selectedReturnQuantity !== mayarReturnPiecesCount) {
+      if (isMayar && selectedReturnQuantity !== mayarReturnPiecesCount) {
         throw new Error(
           `عدد القطع المختارة (${selectedReturnQuantity}) لا يساوي عدد القطع المسترجعة (${mayarReturnPiecesCount})`
         );
@@ -375,7 +375,7 @@ export async function POST(request: Request) {
         0
       );
 
-      if (sentCount !== mayarSentPiecesCount) {
+      if (isMayar && sentCount !== mayarSentPiecesCount) {
         throw new Error(
           `عدد القطع الجديدة في الطلب (${sentCount}) لا يساوي عدد القطع المرسلة للمعيار (${mayarSentPiecesCount})`
         );
