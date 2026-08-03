@@ -493,7 +493,7 @@ export async function POST(request: Request) {
             : isPrivateTripoli
               ? shippingFee
               : 0,
-          mayar_parcel_type: isMayar ? mayarParcelType : "full_delivery",
+          mayar_parcel_type: mayarParcelType,
           mayar_sent_pieces_count: isMayar ? mayarSentPiecesCount : 1,
           mayar_return_pieces_count:
             isMayar && mayarParcelType === "exchange"
