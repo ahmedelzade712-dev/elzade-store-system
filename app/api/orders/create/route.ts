@@ -1,365 +1,694 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
-function numberValue(value: any): number {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : 0;
+function asNumber(value: unknown, fallback = 0) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
 }
 
-function asOne(value: any) {
-  return Array.isArray(value) ? value[0] : value;
+function asText(value: unknown) {
+  return String(value ?? "").trim();
 }
 
-async function getSetting(
-  key: string,
-  fallback: number
-): Promise<number> {
-  const { data, error } = await supabaseAdmin
-    .from("financial_settings")
-    .select("setting_value")
-    .eq("setting_key", key)
-    .maybeSingle();
+function getStoreLetter(storeName: string) {
+  const normalized = storeName.toLowerCase();
 
-  if (error) {
-    throw new Error(
-      `خطأ في قراءة الإعداد المالي ${key}: ${error.message}`
+  if (normalized.includes("adora")) return "A";
+  if (normalized.includes("aban")) return "B";
+  if (normalized.includes("diana")) return "D";
+
+  return storeName.trim().charAt(0).toUpperCase() || "X";
+}
+
+async function generateOrderCode(storeId: string) {
+  const { data: store, error: storeError } = await supabaseAdmin
+    .from("stores")
+    .select("id, name")
+    .eq("id", storeId)
+    .single();
+
+  if (storeError || !store) {
+    throw new Error("المتجر غير موجود");
+  }
+
+  const prefix = getStoreLetter(store.name || "");
+
+  const { data: orders, error: ordersError } = await supabaseAdmin
+    .from("orders")
+    .select("order_code")
+    .ilike("order_code", `${prefix}%`);
+
+  if (ordersError) throw new Error(ordersError.message);
+
+  const maxNumber = (orders || []).reduce((max: number, order: any) => {
+    const match = String(order.order_code || "").match(
+      new RegExp(`^${prefix}(\\d+)$`)
     );
-  }
 
-  if (!data) {
-    return fallback;
-  }
+    if (!match) return max;
+    return Math.max(max, Number(match[1] || 0));
+  }, 0);
 
-  const value = numberValue(data.setting_value);
+  const nextNumber = maxNumber + 1;
+  const padded =
+    nextNumber < 1000
+      ? String(nextNumber).padStart(3, "0")
+      : String(nextNumber);
 
-  return value > 0 ? value : fallback;
+  return `${prefix}${padded}`;
 }
 
-/*
-  تسجل الحركة مرة واحدة فقط.
+type StockRollback = {
+  variantId: string;
+  beforeQty: number;
+};
 
-  إذا كانت source_key مسجلة سابقًا، ترجع Supabase الخطأ 23505.
-  يتم تجاهل هذا الخطأ حتى لا يضاف الرصيد أو الخصم مرتين.
-*/
-async function insertTransactionIfMissing(payload: any) {
-  const { error } = await supabaseAdmin
-    .from("financial_transactions")
-    .insert(payload);
+type NormalizedCartItem = {
+  variantId: string;
+  quantity: number;
+  salePrice: number;
+  costPrice: number;
+  productName: string;
+  color: string;
+  size: string;
+  productId: string;
+};
 
-  if (error && error.code !== "23505") {
-    throw new Error(
-      "خطأ في تسجيل الحركة المالية: " + error.message
-    );
-  }
-}
-
-/*
-  حساب قيمة المنتجات من جدول عناصر الطلب.
-
-  الأولوية:
-  1. unit_price المحفوظ مع عنصر الطلب.
-  2. sale_price الموجود داخل جدول المنتج/المقاس.
-*/
-function calculateItemsTotal(orderItems: any[]): number {
-  return (orderItems || []).reduce(
-    (total: number, item: any) => {
-      const quantity = numberValue(item?.quantity);
-      const variant = asOne(item?.product_variants);
-
-      const savedUnitPrice = numberValue(item?.unit_price);
-      const tableUnitPrice = numberValue(variant?.sale_price);
-
-      const unitPrice =
-        savedUnitPrice > 0
-          ? savedUnitPrice
-          : tableUnitPrice;
-
-      return total + quantity * unitPrice;
-    },
-    0
-  );
-}
+type ExchangeReturnRow = {
+  original_order_id: string;
+  original_order_item_id: string;
+  variant_id: string;
+  quantity: number;
+  inventory_restored: boolean;
+};
 
 export async function POST(request: Request) {
+  let createdCustomerId: string | null = null;
+  let createdOrderId: string | null = null;
+  const stockRollbacks: StockRollback[] = [];
+  const createdMovementIds: string[] = [];
+
   try {
     const body = await request.json();
-    const orderId = String(body?.order_id || "").trim();
 
-    if (!orderId) {
-      throw new Error("رقم الطلب الداخلي order_id مطلوب");
+    const customerName = asText(body.customerName) || "بدون اسم";
+    const phone = asText(body.phone).replace(/\D/g, "");
+    const phone2 = asText(body.phone2) || null;
+    const cityId = asText(body.cityId);
+    const areaId = asText(body.areaId);
+    const address = asText(body.address);
+    const metaLink = asText(body.metaLink) || null;
+    const whatsappLink = asText(body.whatsappLink) || null;
+    const storeId = asText(body.storeId);
+    const notes = asText(body.notes);
+    const createdBy = asText(body.createdBy);
+    const isScheduled = Boolean(body.isScheduled);
+    const scheduledFor = asText(body.scheduledFor) || null;
+    const isTrialOrder = Boolean(body.isTrialOrder);
+    const isSelectionOrder = Boolean(body.isSelectionOrder);
+    const selectionIntendedQuantity = isSelectionOrder
+      ? Math.max(1, Math.trunc(asNumber(body.selectionIntendedQuantity, 1)))
+      : 0;
+    const shippingPayer =
+      body.shippingPayer === "store" ? "store" : "customer";
+    const shippingFee = Math.max(0, asNumber(body.shippingFee));
+    const mayarParcelType =
+      body.mayarParcelType === "exchange" ? "exchange" : "full_delivery";
+    const mayarSentPiecesCount = Math.max(
+      1,
+      Math.trunc(asNumber(body.mayarSentPiecesCount, 1))
+    );
+    const mayarReturnPiecesCount = Math.max(
+      0,
+      Math.trunc(asNumber(body.mayarReturnPiecesCount, 0))
+    );
+    const mayarOpenable = Boolean(body.mayarOpenable);
+    const mayarShippingIncluded = Boolean(body.mayarShippingIncluded);
+    const mayarShippingAmount = mayarShippingIncluded
+      ? Math.max(0, asNumber(body.mayarShippingAmount))
+      : 0;
+    const exchangeOriginalOrderId = asText(body.exchangeOriginalOrderId) || null;
+    const exchangeReturnSelections =
+      body.exchangeReturnSelections &&
+      typeof body.exchangeReturnSelections === "object"
+        ? body.exchangeReturnSelections
+        : {};
+    const cart = Array.isArray(body.cart) ? body.cart : [];
+
+    if (!/^09\d{8}$/.test(phone)) {
+      throw new Error("رقم الهاتف يجب أن يكون 10 أرقام ويبدأ بـ 09");
     }
 
-    const { data: order, error: orderError } =
-      await supabaseAdmin
-        .from("orders")
-        .select(`
-          id,
-          order_code,
-          store_id,
-          total_amount,
-          shipping_fee,
-          status,
-          printed_at,
-          mayar_parcel_type,
-          exchange_original_order_id,
-          customers(
-            cities(name)
-          ),
-          order_items(
+    if (!storeId || !cityId || !areaId || !createdBy) {
+      throw new Error("بيانات الطلب الأساسية غير مكتملة");
+    }
+
+    if (cart.length === 0) {
+      throw new Error("يجب إضافة منتج واحد على الأقل إلى الطلب");
+    }
+
+    const { data: destination, error: destinationError } = await supabaseAdmin
+      .from("areas")
+      .select(`
+        id,
+        city_id,
+        mayar_subzone_id,
+        is_active,
+        cities(id, name, mayar_zone_id)
+      `)
+      .eq("id", areaId)
+      .single();
+
+    if (destinationError || !destination) {
+      throw new Error("المنطقة المختارة غير موجودة");
+    }
+
+    if (destination.city_id !== cityId || destination.is_active === false) {
+      throw new Error("المنطقة المختارة لا تتبع المدينة الحالية");
+    }
+
+    const city = Array.isArray(destination.cities)
+      ? destination.cities[0]
+      : destination.cities;
+    const isPrivateTripoli = city?.name === "طرابلس (خاصة)";
+    const isMayar = !isPrivateTripoli;
+
+    if (isMayar && (!city?.mayar_zone_id || !destination.mayar_subzone_id)) {
+      throw new Error("المدينة أو المنطقة غير مرتبطة ببيانات المعيار");
+    }
+
+    if (isMayar && mayarShippingIncluded && mayarShippingAmount <= 0) {
+      throw new Error("يجب إدخال قيمة الشحن عند اختيار السعر شامل الشحن");
+    }
+
+    if (isTrialOrder && !isPrivateTripoli) {
+      throw new Error("طلب التجربة مسموح فقط لطرابلس الخاصة");
+    }
+
+    if (isSelectionOrder && !isPrivateTripoli) {
+      throw new Error("طلب الاختيار مسموح فقط لطرابلس الخاصة");
+    }
+
+    const { data: duplicateOrders, error: duplicateError } = await supabaseAdmin
+      .from("orders")
+      .select("id, order_code, customers!inner(phone)")
+      .eq("customers.phone", phone)
+      .eq("status", "new")
+      .limit(1);
+
+    if (duplicateError) {
+      throw new Error("فشل فحص الطلبات المكررة: " + duplicateError.message);
+    }
+
+    if (duplicateOrders && duplicateOrders.length > 0) {
+      throw new Error(
+        `هذا الرقم لديه طلب جديد سابق: ${duplicateOrders[0].order_code}`
+      );
+    }
+
+    const normalizedCart: NormalizedCartItem[] = cart.map((item: any): NormalizedCartItem => ({
+      variantId: asText(item.variant_id),
+      quantity: Math.trunc(asNumber(item.quantity)),
+      salePrice: Math.max(0, asNumber(item.sale_price)),
+      costPrice: Math.max(0, asNumber(item.cost_price)),
+      productName: asText(item.product_name),
+      color: asText(item.color),
+      size: asText(item.size),
+      productId: asText(item.product_id),
+    }));
+
+    for (const item of normalizedCart) {
+      if (!item.variantId || item.quantity < 1) {
+        throw new Error("توجد قطعة بكمية أو معرّف غير صحيح");
+      }
+    }
+
+    const sentItemsQuantity = normalizedCart.reduce(
+      (sum: number, item: NormalizedCartItem) => sum + item.quantity,
+      0
+    );
+
+    if (
+      isSelectionOrder &&
+      (selectionIntendedQuantity < 1 ||
+        selectionIntendedQuantity > sentItemsQuantity)
+    ) {
+      throw new Error(
+        `عدد القطع المتوقع شراؤها (${selectionIntendedQuantity}) يجب أن يكون بين 1 وعدد القطع المرسلة (${sentItemsQuantity})`
+      );
+    }
+
+    const uniqueVariantIds = [...new Set(normalizedCart.map((item: NormalizedCartItem) => item.variantId))];
+
+    const { data: variants, error: variantsError } = await supabaseAdmin
+      .from("product_variants")
+      .select(`
+        id,
+        store_id,
+        product_id,
+        stock_quantity,
+        cost_price,
+        sale_price,
+        color,
+        size,
+        is_active,
+        products(name, model)
+      `)
+      .in("id", uniqueVariantIds);
+
+    if (variantsError) {
+      throw new Error("فشل قراءة المخزون: " + variantsError.message);
+    }
+
+    const variantMap = new Map<string, any>(
+      (variants || []).map((variant: any): [string, any] => [variant.id, variant])
+    );
+
+    for (const item of normalizedCart) {
+      const variant = variantMap.get(item.variantId);
+
+      if (!variant || variant.is_active === false) {
+        throw new Error(`القطعة ${item.productName || item.variantId} غير متاحة`);
+      }
+
+      if (variant.store_id !== storeId) {
+        throw new Error("توجد قطعة لا تتبع المتجر المحدد");
+      }
+
+      if (asNumber(variant.stock_quantity) < item.quantity) {
+        throw new Error(
+          `الكمية غير كافية للمنتج ${item.productName} / ${item.color} / ${item.size}. المتوفر الآن: ${variant.stock_quantity}`
+        );
+      }
+    }
+
+    let exchangeRows: ExchangeReturnRow[] = [];
+
+    if (mayarParcelType === "exchange") {
+      if (!exchangeOriginalOrderId) {
+        throw new Error("يجب اختيار الطلب الأصلي للاستبدال");
+      }
+
+      const { data: originalOrder, error: originalOrderError } =
+        await supabaseAdmin
+          .from("orders")
+          .select(`
             id,
-            quantity,
-            unit_price,
-            product_variants(
-              sale_price
-            )
-          )
-        `)
-        .eq("id", orderId)
+            order_code,
+            status,
+            store_id,
+            order_items(id, variant_id, quantity)
+          `)
+          .eq("id", exchangeOriginalOrderId)
+          .single();
+
+      if (originalOrderError || !originalOrder) {
+        throw new Error("الطلب الأصلي غير موجود");
+      }
+
+      if (originalOrder.store_id !== storeId) {
+        throw new Error("الطلب الأصلي يتبع متجرًا مختلفًا");
+      }
+
+      if (originalOrder.status !== "delivered") {
+        throw new Error("الطلب الأصلي يجب أن يكون تم تسليمه");
+      }
+
+      const { data: openExchange, error: openExchangeError } =
+        await supabaseAdmin
+          .from("orders")
+          .select("id, order_code")
+          .eq("exchange_original_order_id", originalOrder.id)
+          .eq("mayar_parcel_type", "exchange")
+          .eq("exchange_return_received", false)
+          .maybeSingle();
+
+      if (openExchangeError) {
+        throw new Error("فشل فحص الاستبدال السابق: " + openExchangeError.message);
+      }
+
+      if (openExchange) {
+        throw new Error(
+          `هذا الطلب مرتبط بالفعل باستبدال مفتوح: ${openExchange.order_code}`
+        );
+      }
+
+      exchangeRows = (originalOrder.order_items || [])
+        .map((originalItem: any) => {
+          const selectedQty = Math.trunc(
+            asNumber(exchangeReturnSelections[originalItem.id])
+          );
+
+          if (selectedQty < 1) return null;
+
+          if (selectedQty > asNumber(originalItem.quantity)) {
+            throw new Error("الكمية الراجعة أكبر من الكمية الأصلية");
+          }
+
+          return {
+            original_order_id: originalOrder.id,
+            original_order_item_id: originalItem.id,
+            variant_id: originalItem.variant_id,
+            quantity: selectedQty,
+            inventory_restored: false,
+          };
+        })
+        .filter((row: ExchangeReturnRow | null): row is ExchangeReturnRow => row !== null);
+
+      const selectedReturnQuantity = exchangeRows.reduce(
+        (sum: number, row: ExchangeReturnRow) => sum + asNumber(row.quantity),
+        0
+      );
+
+      if (selectedReturnQuantity < 1) {
+        throw new Error("اختر قطعة واحدة على الأقل ستعود من الطلب الأصلي");
+      }
+
+      if (isMayar && selectedReturnQuantity !== mayarReturnPiecesCount) {
+        throw new Error(
+          `عدد القطع المختارة (${selectedReturnQuantity}) لا يساوي عدد القطع المسترجعة (${mayarReturnPiecesCount})`
+        );
+      }
+
+      const sentCount = normalizedCart.reduce(
+        (sum: number, item: NormalizedCartItem) => sum + item.quantity,
+        0
+      );
+
+      if (isMayar && sentCount !== mayarSentPiecesCount) {
+        throw new Error(
+          `عدد القطع الجديدة في الطلب (${sentCount}) لا يساوي عدد القطع المرسلة للمعيار (${mayarSentPiecesCount})`
+        );
+      }
+    }
+
+    function calculateGroupedTrialTotal(field: "salePrice" | "costPrice") {
+      const groups = new Map<string, number>();
+
+      for (const item of normalizedCart) {
+        const groupKey = `${item.productId}-${item.color}`;
+        const current = groups.get(groupKey) || 0;
+        groups.set(groupKey, Math.max(current, item[field]));
+      }
+
+      return Array.from(groups.values()).reduce(
+        (sum: number, value: number) => sum + value,
+        0
+      );
+    }
+
+    function calculateSelectionTotal(
+      field: "salePrice" | "costPrice",
+      requiredQuantity: number
+    ) {
+      let remainingQuantity = Math.max(0, requiredQuantity);
+      let total = 0;
+
+      for (const item of normalizedCart) {
+        if (remainingQuantity <= 0) break;
+        const countedQuantity = Math.min(item.quantity, remainingQuantity);
+        total += countedQuantity * item[field];
+        remainingQuantity -= countedQuantity;
+      }
+
+      return total;
+    }
+
+    const totalAmount =
+      isSelectionOrder && isPrivateTripoli
+        ? calculateSelectionTotal("salePrice", selectionIntendedQuantity)
+        : isTrialOrder && isPrivateTripoli
+          ? calculateGroupedTrialTotal("salePrice")
+          : normalizedCart.reduce(
+            (sum: number, item: NormalizedCartItem) =>
+              sum + item.quantity * item.salePrice,
+            0
+          );
+
+    const totalCost =
+      isSelectionOrder && isPrivateTripoli
+        ? calculateSelectionTotal("costPrice", selectionIntendedQuantity)
+        : isTrialOrder && isPrivateTripoli
+          ? calculateGroupedTrialTotal("costPrice")
+          : normalizedCart.reduce(
+            (sum: number, item: NormalizedCartItem) =>
+              sum + item.quantity * item.costPrice,
+            0
+          );
+
+    const { data: customer, error: customerError } = await supabaseAdmin
+      .from("customers")
+      .insert({
+        name: customerName,
+        phone,
+        phone2,
+        city_id: cityId,
+        area_id: areaId,
+        address,
+        meta_link: metaLink,
+        whatsapp_link: whatsappLink,
+      })
+      .select("id")
+      .single();
+
+    if (customerError || !customer) {
+      throw new Error("خطأ في حفظ العميل: " + customerError?.message);
+    }
+
+    createdCustomerId = customer.id;
+
+    const isExchange = mayarParcelType === "exchange";
+    const exchangeStoreShippingFee =
+      isExchange && shippingPayer === "store" ? 15 : 0;
+    const exchangeCourierReward =
+      isExchange && shippingPayer === "store" ? 5 : 0;
+
+    let orderCode = "";
+    let order: any = null;
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      orderCode = await generateOrderCode(storeId);
+
+      const result = await supabaseAdmin
+        .from("orders")
+        .insert({
+          store_id: storeId,
+          customer_id: customer.id,
+          order_code: orderCode,
+          status: "new",
+          is_trial_order:
+            (isTrialOrder || isSelectionOrder) && isPrivateTripoli,
+          trial_status:
+            (isTrialOrder || isSelectionOrder) && isPrivateTripoli
+              ? "open"
+              : null,
+          trial_due_at:
+            (isTrialOrder || isSelectionOrder) && isPrivateTripoli
+              ? new Date(Date.now() + 10 * 60 * 60 * 1000).toISOString()
+              : null,
+          total_amount: isExchange ? 0 : totalAmount,
+          total_cost: isExchange ? 0 : totalCost,
+          shipping_fee: isExchange
+            ? exchangeStoreShippingFee
+            : isPrivateTripoli
+              ? shippingFee
+              : 0,
+          mayar_parcel_type: mayarParcelType,
+          mayar_sent_pieces_count: isMayar ? mayarSentPiecesCount : 1,
+          mayar_return_pieces_count:
+            isMayar && mayarParcelType === "exchange"
+              ? mayarReturnPiecesCount
+              : 0,
+          mayar_openable: isMayar ? mayarOpenable : true,
+          mayar_shipping_included: isMayar ? mayarShippingIncluded : false,
+          mayar_shipping_amount:
+            isMayar && mayarShippingIncluded ? mayarShippingAmount : 0,
+          exchange_original_order_id: isExchange
+            ? exchangeOriginalOrderId
+            : null,
+          exchange_return_received: false,
+          scheduled_for: isScheduled ? scheduledFor : null,
+          notes: isSelectionOrder
+            ? [notes, `[طلب اختيار] العدد المتوقع شراؤه: ${selectionIntendedQuantity}`]
+                .filter(Boolean)
+                .join(" - ")
+            : notes,
+          created_by: createdBy,
+        })
+        .select("id, order_code")
         .single();
 
-    if (orderError) {
-      throw new Error(
-        "خطأ في قراءة الطلب: " + orderError.message
-      );
+      if (!result.error && result.data) {
+        order = result.data;
+        break;
+      }
+
+      if (result.error?.code !== "23505") {
+        throw new Error("خطأ في حفظ الطلب: " + result.error?.message);
+      }
     }
 
     if (!order) {
-      throw new Error("الطلب غير موجود");
+      throw new Error("تعذر إنشاء كود فريد للطلب. أعد المحاولة");
     }
 
-    const customerRecord = asOne(order.customers);
-    const cityRecord = asOne(customerRecord?.cities);
-    const cityName = String(cityRecord?.name || "").trim();
+    createdOrderId = order.id;
 
-    if (cityName !== "طرابلس (خاصة)") {
-      throw new Error(
-        `الطلب ${order.order_code || ""} ليس من طرابلس خاصة`
-      );
-    }
-
-    const isExchangeOrder =
-      String(order.mayar_parcel_type || "") === "exchange" ||
-      Boolean(order.exchange_original_order_id);
-
-    /*
-      طلب الاستبدال في طرابلس الخاصة لا ينشئ أي حركة مالية:
-      - لا مبيعات
-      - لا خصم رسوم توصيل
-      - لا مكافأة مندوب
-    */
-    if (isExchangeOrder) {
-      return NextResponse.json({
-        ok: true,
-        skipped: true,
-        reason: "exchange_order",
-        order_code: order.order_code,
-        sale_amount: 0,
-        shipping_deduction: 0,
-        courier_reward: 0,
-        balance_effect: 0,
-      });
-    }
-
-    const enteredOrderAmount = numberValue(
-      order.total_amount
-    );
-
-    const itemsTableAmount = calculateItemsTotal(
-      order.order_items || []
-    );
-
-    /*
-      منطق قيمة المنتجات:
-
-      إذا أدخل المستخدم قيمة أكبر من صفر:
-      نعتمد القيمة التي أدخلها.
-
-      إذا أدخل المستخدم صفر:
-      نعتمد مجموع أسعار المنتجات من الجدول.
-      هذه الحالة تعني أن العميل دفع قيمة المنتجات بحوالة مصرفية.
-    */
-    const saleAmount =
-      enteredOrderAmount > 0
-        ? enteredOrderAmount
-        : itemsTableAmount;
-
-    if (saleAmount <= 0) {
-      throw new Error(
-        `تعذر حساب قيمة الطلب ${
-          order.order_code || ""
-        }. قيمة الطلب المدخلة صفر وأسعار المنتجات في الجدول غير صحيحة.`
-      );
-    }
-
-    const shippingFee = numberValue(order.shipping_fee);
-
-    const courierReward = await getSetting(
-      "private_tripoli_courier_reward",
-      5
-    );
-
-    const standardShippingFee = await getSetting(
-      "private_tripoli_standard_shipping_fee",
-      15
-    );
-
-    const occurredAt =
-      order.printed_at || new Date().toISOString();
-
-    /*
-      1. إضافة قيمة المنتجات إلى الرصيد.
-
-      سواء كانت القيمة مدخلة يدويًا أو محسوبة من الجدول،
-      يتم تسجيل حركة مبيعات واحدة فقط.
-    */
-    await insertTransactionIfMissing({
-      store_id: order.store_id,
+    const orderItemsPayload = normalizedCart.map((item: NormalizedCartItem) => ({
       order_id: order.id,
-      transaction_type: "sale",
-      direction: "credit",
-      category: "مبيعات",
-      amount: saleAmount,
-      description:
-        enteredOrderAmount > 0
-          ? `إضافة قيمة طلب طرابلس خاصة ${order.order_code} إلى الرصيد`
-          : `إضافة قيمة منتجات الطلب ${order.order_code} المحولة مصرفيًا إلى الرصيد`,
-      source_key:
-        `order:${order.id}:private_tripoli_sale`,
-      is_system_generated: true,
-      occurred_at: occurredAt,
-      metadata: {
-        order_code: order.order_code,
-        shipping_company: "private_tripoli",
-        entered_order_amount: enteredOrderAmount,
-        calculated_items_amount: itemsTableAmount,
-        final_sale_amount: saleAmount,
-        shipping_fee: shippingFee,
-        payment_type:
-          enteredOrderAmount > 0
-            ? "normal"
-            : "bank_transfer",
-      },
-    });
+      variant_id: item.variantId,
+      quantity: item.quantity,
+      unit_price: isExchange ? 0 : item.salePrice,
+      unit_cost: item.costPrice,
+      is_trial_item:
+        (isTrialOrder || isSelectionOrder) && isPrivateTripoli,
+      trial_group_key:
+        (isTrialOrder || isSelectionOrder) && isPrivateTripoli
+          ? `${item.productId}-${item.color}`
+          : null,
+      trial_kept: false,
+    }));
 
-    /*
-      2. عندما تكون قيمة التوصيل المدخلة صفر:
+    const { error: orderItemsError } = await supabaseAdmin
+      .from("order_items")
+      .insert(orderItemsPayload);
 
-      معنى ذلك أن العميل لم يدفع التوصيل،
-      ولذلك يتحمل المتجر 15 د.ل للمندوب.
-    */
-    const storePaysShipping = shippingFee === 0;
-
-    if (storePaysShipping) {
-      await insertTransactionIfMissing({
-        store_id: order.store_id,
-        order_id: order.id,
-        transaction_type: "expense",
-        direction: "debit",
-        category: "رسوم التوصيل",
-        amount: standardShippingFee,
-        description:
-          `خصم رسوم توصيل الطلب ${order.order_code} من الرصيد`,
-        source_key:
-          `order:${order.id}:private_tripoli_shipping_fee`,
-        is_system_generated: true,
-        occurred_at: occurredAt,
-        metadata: {
-          order_code: order.order_code,
-          shipping_company: "private_tripoli",
-          entered_shipping_fee: shippingFee,
-          charged_to_store: standardShippingFee,
-        },
-      });
+    if (orderItemsError) {
+      throw new Error("فشل حفظ منتجات الطلب: " + orderItemsError.message);
     }
 
-    /*
-      3. مكافأة المندوب 5 د.ل:
+    // نسجل القطع القديمة قبل خصم الجديدة. باستخدام supabaseAdmin لا تخضع العملية لـ RLS.
+    if (exchangeRows.length > 0) {
+      const rowsWithExchangeOrder = exchangeRows.map((row: ExchangeReturnRow) => ({
+        ...row,
+        exchange_order_id: order.id,
+      }));
 
-      تطبق في حالتين:
-      - التوصيل المدخل 15 د.ل.
-      - التوصيل المدخل 0 د.ل.
+      const { error: exchangeItemsError } = await supabaseAdmin
+        .from("order_exchange_return_items")
+        .insert(rowsWithExchangeOrder);
 
-      أما إذا كانت رسوم التوصيل 20 د.ل،
-      فلا يتم تطبيق مكافأة 5 د.ل وفق المنطق السابق للنظام.
-    */
-    const rewardApplied =
-      courierReward > 0 &&
-      (shippingFee === 0 ||
-        shippingFee === standardShippingFee);
-
-    if (rewardApplied) {
-      await insertTransactionIfMissing({
-        store_id: order.store_id,
-        order_id: order.id,
-        transaction_type: "courier_reward",
-        direction: "debit",
-        category: "مكافآت المناديب",
-        amount: courierReward,
-        description:
-          `مكافأة مندوب الطلب ${order.order_code}`,
-        source_key:
-          `order:${order.id}:private_tripoli_courier_reward`,
-        is_system_generated: true,
-        occurred_at: occurredAt,
-        metadata: {
-          order_code: order.order_code,
-          shipping_company: "private_tripoli",
-          shipping_fee: shippingFee,
-          courier_reward: courierReward,
-        },
-      });
+      if (exchangeItemsError) {
+        throw new Error(
+          "فشل حفظ بيانات القطع الراجعة: " + exchangeItemsError.message
+        );
+      }
     }
 
-    const shippingDeduction = storePaysShipping
-      ? standardShippingFee
-      : 0;
+    for (const item of normalizedCart) {
+      const { data: freshVariant, error: freshVariantError } =
+        await supabaseAdmin
+          .from("product_variants")
+          .select("stock_quantity")
+          .eq("id", item.variantId)
+          .single();
 
-    const rewardDeduction = rewardApplied
-      ? courierReward
-      : 0;
+      if (freshVariantError || !freshVariant) {
+        throw new Error("فشل قراءة المخزون الحالي: " + freshVariantError?.message);
+      }
 
-    const balanceEffect =
-      saleAmount -
-      shippingDeduction -
-      rewardDeduction;
+      const beforeQty = asNumber(freshVariant.stock_quantity);
+      const afterQty = beforeQty - item.quantity;
+
+      if (afterQty < 0) {
+        throw new Error(
+          `الكمية أصبحت غير كافية للمنتج ${item.productName} / ${item.color} / ${item.size}`
+        );
+      }
+
+      const { error: stockError } = await supabaseAdmin
+        .from("product_variants")
+        .update({ stock_quantity: afterQty })
+        .eq("id", item.variantId)
+        .eq("stock_quantity", beforeQty);
+
+      if (stockError) {
+        throw new Error("فشل خصم المخزون: " + stockError.message);
+      }
+
+      stockRollbacks.push({ variantId: item.variantId, beforeQty });
+
+      const { data: movement, error: movementError } = await supabaseAdmin
+        .from("inventory_movements")
+        .insert({
+          variant_id: item.variantId,
+          movement_type: isExchange
+            ? "exchange_new_item"
+            : isSelectionOrder
+              ? "selection_send"
+              : "sale",
+          quantity_change: -item.quantity,
+          quantity_before: beforeQty,
+          quantity_after: afterQty,
+          reason: isExchange
+            ? `استبدال - إرسال الجديد ${order.order_code}`
+            : isSelectionOrder
+              ? `طلب اختيار - إرسال ${sentItemsQuantity} والمتوقع شراء ${selectionIntendedQuantity} - ${order.order_code}`
+              : `بيع - ${order.order_code}`,
+        })
+        .select("id")
+        .single();
+
+      if (movementError || !movement) {
+        throw new Error("فشل تسجيل حركة المخزون: " + movementError?.message);
+      }
+
+      createdMovementIds.push(movement.id);
+    }
 
     return NextResponse.json({
       ok: true,
-      order_code: order.order_code,
-
-      entered_order_amount: enteredOrderAmount,
-      calculated_items_amount: itemsTableAmount,
-      sale_amount: saleAmount,
-
-      shipping_fee_entered: shippingFee,
-      shipping_deduction: shippingDeduction,
-      courier_reward: rewardDeduction,
-
-      balance_effect: balanceEffect,
-
-      calculation: {
-        credit: saleAmount,
-        shipping_debit: shippingDeduction,
-        reward_debit: rewardDeduction,
-        net: balanceEffect,
+      order: {
+        id: order.id,
+        order_code: order.order_code,
       },
+      is_mayar: isMayar,
+      is_exchange: isExchange,
+      is_selection_order: isSelectionOrder,
+      selection_intended_quantity: isSelectionOrder
+        ? selectionIntendedQuantity
+        : null,
+      shipping_payer: isExchange ? shippingPayer : null,
+      exchange_shipping_deduction: exchangeStoreShippingFee,
+      exchange_courier_reward_deduction: exchangeCourierReward,
+      mayar_shipping_included: isMayar ? mayarShippingIncluded : false,
+      mayar_shipping_amount:
+        isMayar && mayarShippingIncluded ? mayarShippingAmount : 0,
+      deducted_items_count: normalizedCart.reduce(
+        (sum: number, item: NormalizedCartItem) => sum + item.quantity,
+        0
+      ),
     });
   } catch (error: any) {
-    console.error(
-      "PRIVATE TRIPOLI FINANCIAL ERROR:",
-      error
-    );
+    // تعويض أي خصم مخزون تم قبل حدوث الخطأ.
+    for (const rollback of [...stockRollbacks].reverse()) {
+      await supabaseAdmin
+        .from("product_variants")
+        .update({ stock_quantity: rollback.beforeQty })
+        .eq("id", rollback.variantId);
+    }
+
+    if (createdMovementIds.length > 0) {
+      await supabaseAdmin
+        .from("inventory_movements")
+        .delete()
+        .in("id", createdMovementIds);
+    }
+
+    if (createdOrderId) {
+      await supabaseAdmin.from("orders").delete().eq("id", createdOrderId);
+    }
+
+    if (createdCustomerId) {
+      await supabaseAdmin.from("customers").delete().eq("id", createdCustomerId);
+    }
 
     return NextResponse.json(
       {
         ok: false,
-        error:
-          error?.message ||
-          "فشل تسجيل رصيد طرابلس الخاصة",
+        error: error.message || "فشل حفظ الطلب",
       },
-      {
-        status: 500,
-      }
+      { status: 500 }
     );
   }
 }
