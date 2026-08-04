@@ -100,6 +100,8 @@ export async function POST(request: Request) {
           shipping_fee,
           status,
           printed_at,
+          mayar_parcel_type,
+          exchange_original_order_id,
           customers(
             cities(name)
           ),
@@ -133,6 +135,29 @@ export async function POST(request: Request) {
       throw new Error(
         `الطلب ${order.order_code || ""} ليس من طرابلس خاصة`
       );
+    }
+
+    const isExchangeOrder =
+      String(order.mayar_parcel_type || "").trim() === "exchange" ||
+      Boolean(order.exchange_original_order_id);
+
+    /*
+      طلب الاستبدال في طرابلس الخاصة لا ينشئ أي حركة مالية:
+      - لا إضافة مبيعات إلى الرصيد
+      - لا خصم رسوم توصيل
+      - لا خصم مكافأة مندوب
+    */
+    if (isExchangeOrder) {
+      return NextResponse.json({
+        ok: true,
+        skipped: true,
+        reason: "exchange_order",
+        order_code: order.order_code,
+        sale_amount: 0,
+        shipping_deduction: 0,
+        courier_reward: 0,
+        balance_effect: 0,
+      });
     }
 
     const enteredOrderAmount = numberValue(
