@@ -21,6 +21,7 @@ export default function NewOrderPage() {
   const [shippingPayer, setShippingPayer] = useState<ShippingPayer>("customer");
   const [mayarShippingIncluded, setMayarShippingIncluded] = useState(false);
   const [mayarShippingAmount, setMayarShippingAmount] = useState("");
+  const [mayarBankTransferAmount, setMayarBankTransferAmount] = useState("");
 
   const [customerName, setCustomerName] = useState("");
   const [phone, setPhone] = useState("");
@@ -390,8 +391,20 @@ export default function NewOrderPage() {
       setMayarOpenable(true);
       setMayarShippingIncluded(false);
       setMayarShippingAmount("");
+      setMayarBankTransferAmount("");
     }
   }, [isMayarShippingSelected]);
+
+  useEffect(() => {
+    const shouldUseBankTransferField =
+      isMayarShippingSelected &&
+      !isExchangeOrder &&
+      totalAmount === 0;
+
+    if (!shouldUseBankTransferField) {
+      setMayarBankTransferAmount("");
+    }
+  }, [isMayarShippingSelected, isExchangeOrder, totalAmount]);
 
   useEffect(() => {
     if (!isPrivateTripoliSelected() && isSelectionOrder) {
@@ -720,6 +733,19 @@ export default function NewOrderPage() {
       }
     }
 
+    if (
+      isMayarShippingSelected &&
+      !isExchangeOrder &&
+      totalAmount === 0
+    ) {
+      const bankTransferAmount = Number(mayarBankTransferAmount || 0);
+
+      if (!Number.isFinite(bankTransferAmount) || bankTransferAmount <= 0) {
+        setMessage("أدخل القيمة المحولة عبر البنك حتى تُضاف إلى الرصيد فورًا");
+        return;
+      }
+    }
+
     if (isMayarShippingSelected && mayarShippingIncluded) {
       const enteredShippingAmount = Number(mayarShippingAmount || 0);
 
@@ -771,6 +797,12 @@ export default function NewOrderPage() {
           mayarShippingAmount:
             isMayarShippingSelected && mayarShippingIncluded
               ? Number(mayarShippingAmount || 0)
+              : 0,
+          mayarBankTransferAmount:
+            isMayarShippingSelected &&
+            !isExchangeOrder &&
+            totalAmount === 0
+              ? Number(mayarBankTransferAmount || 0)
               : 0,
           exchangeOriginalOrderId: isExchangeOrder
             ? exchangeOriginalOrder?.id || null
@@ -851,6 +883,7 @@ export default function NewOrderPage() {
       setShippingPayer("customer");
       setMayarShippingIncluded(false);
       setMayarShippingAmount("");
+      setMayarBankTransferAmount("");
       setMayarParcelType("full_delivery");
       setMayarSentPiecesCount(1);
       setMayarReturnPiecesCount(1);
@@ -1564,6 +1597,36 @@ export default function NewOrderPage() {
                   </p>
                 </div>
               </div>
+
+              {isMayarShippingSelected &&
+                !isExchangeOrder &&
+                totalAmount === 0 && (
+                  <div className="rounded-xl border border-emerald-600 bg-emerald-950/30 p-4 md:col-span-2">
+                    <label className="mb-2 block font-bold text-emerald-100">
+                      القيمة المحولة عبر البنك
+                    </label>
+
+                    <input
+                      className="w-full rounded-xl bg-neutral-900 p-4 text-left"
+                      type="text"
+                      dir="ltr"
+                      inputMode="decimal"
+                      placeholder="اكتب القيمة التي تُضاف إلى الرصيد فورًا"
+                      value={mayarBankTransferAmount}
+                      onChange={(event) => {
+                        const cleanedValue = event.target.value
+                          .replace(/[^0-9.]/g, "")
+                          .replace(/(\..*)\./g, "$1");
+
+                        setMayarBankTransferAmount(cleanedValue);
+                      }}
+                    />
+
+                    <p className="mt-2 text-xs text-emerald-300">
+                      هذه القيمة تُضاف إلى رصيد النظام فور حفظ الطلب، ولا تُرسل إلى شركة المعيار. عند وصول الطلب إلى تم التسليم لن تُضاف أي قيمة مرة أخرى.
+                    </p>
+                  </div>
+                )}
 
               <div>
                 <label className="mb-2 block text-sm text-neutral-300">

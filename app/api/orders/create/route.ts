@@ -87,6 +87,7 @@ export async function POST(request: Request) {
   let createdOrderId: string | null = null;
   const stockRollbacks: StockRollback[] = [];
   const createdMovementIds: string[] = [];
+  const createdFinancialTransactionIds: string[] = [];
 
   try {
     const body = await request.json();
@@ -127,6 +128,10 @@ export async function POST(request: Request) {
     const mayarShippingAmount = mayarShippingIncluded
       ? Math.max(0, asNumber(body.mayarShippingAmount))
       : 0;
+    const mayarBankTransferAmount = Math.max(
+      0,
+      asNumber(body.mayarBankTransferAmount)
+    );
     const exchangeOriginalOrderId = asText(body.exchangeOriginalOrderId) || null;
     const exchangeReturnSelections =
       body.exchangeReturnSelections &&
@@ -436,6 +441,23 @@ export async function POST(request: Request) {
             0
           );
 
+    const isMayarBankTransferOrder =
+      isMayar &&
+      mayarParcelType !== "exchange" &&
+      totalAmount === 0 &&
+      mayarBankTransferAmount > 0;
+
+    if (
+      isMayar &&
+      mayarParcelType !== "exchange" &&
+      totalAmount === 0 &&
+      mayarBankTransferAmount <= 0
+    ) {
+      throw new Error(
+        "يجب إدخال القيمة المحولة عبر البنك عندما تكون قيمة طلب المعيار صفر"
+      );
+    }
+
     const { data: customer, error: customerError } = await supabaseAdmin
       .from("customers")
       .insert({
@@ -527,6 +549,9 @@ export async function POST(request: Request) {
           mayar_shipping_included: isMayar ? mayarShippingIncluded : false,
           mayar_shipping_amount:
             isMayar && mayarShippingIncluded ? mayarShippingAmount : 0,
+          mayar_bank_transfer_amount:
+            isMayarBankTransferOrder ? mayarBankTransferAmount : 0,
+          mayar_bank_transfer_recorded: isMayarBankTransferOrder,
           exchange_original_order_id: isExchange
             ? exchangeOriginalOrderId
             : null,
@@ -660,6 +685,50 @@ export async function POST(request: Request) {
       createdMovementIds.push(movement.id);
     }
 
+    /*
+      حالة خاصة بطلبات المعيار فقط:
+      عندما تكون قيمة الطلب صفرًا وتم إدخال مبلغ محول عبر البنك،
+      تُضاف القيمة إلى الرصيد فورًا ولا تنتظر حالة "تم التسليم".
+      هذه القيمة لا تؤثر مطلقًا على البيانات المرسلة إلى شركة المعيار.
+    */
+    if (isMayarBankTransferOrder) {
+      const { data: bankTransferTransaction, error: bankTransferError } =
+        await supabaseAdmin
+          .from("financial_transactions")
+          .insert({
+            store_id: storeId,
+            order_id: order.id,
+            transaction_type: "sale",
+            direction: "credit",
+            category: "مبيعات",
+            amount: mayarBankTransferAmount,
+            description:
+              `تم تحويل قيمة طلب المعيار ${order.order_code} عبر البنك`,
+            source_key:
+              `order:${order.id}:mayar_bank_transfer`,
+            is_system_generated: true,
+            occurred_at: new Date().toISOString(),
+            metadata: {
+              order_code: order.order_code,
+              payment_type: "bank_transfer",
+              credited_immediately: true,
+              mayar_collection_amount: 0,
+              bank_transfer_amount: mayarBankTransferAmount,
+            },
+          })
+          .select("id")
+          .single();
+
+      if (bankTransferError || !bankTransferTransaction) {
+        throw new Error(
+          "فشل إضافة قيمة التحويل البنكي إلى الرصيد: " +
+            (bankTransferError?.message || "خطأ غير معروف")
+        );
+      }
+
+      createdFinancialTransactionIds.push(bankTransferTransaction.id);
+    }
+
     return NextResponse.json({
       ok: true,
       order: {
@@ -678,6 +747,9 @@ export async function POST(request: Request) {
       mayar_shipping_included: isMayar ? mayarShippingIncluded : false,
       mayar_shipping_amount:
         isMayar && mayarShippingIncluded ? mayarShippingAmount : 0,
+      mayar_bank_transfer_recorded: isMayarBankTransferOrder,
+      mayar_bank_transfer_amount:
+        isMayarBankTransferOrder ? mayarBankTransferAmount : 0,
       deducted_items_count: normalizedCart.reduce(
         (sum: number, item: NormalizedCartItem) => sum + item.quantity,
         0
@@ -697,6 +769,13 @@ export async function POST(request: Request) {
         .from("inventory_movements")
         .delete()
         .in("id", createdMovementIds);
+    }
+
+    if (createdFinancialTransactionIds.length > 0) {
+      await supabaseAdmin
+        .from("financial_transactions")
+        .delete()
+        .in("id", createdFinancialTransactionIds);
     }
 
     if (createdOrderId) {

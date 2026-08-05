@@ -158,6 +158,7 @@ async function recordDeliveredMayarOrder(shipment: any) {
       total_amount,
       status,
       mayar_parcel_type,
+      mayar_bank_transfer_recorded,
       order_items(
         quantity,
         product_variants(sale_price)
@@ -177,6 +178,31 @@ async function recordDeliveredMayarOrder(shipment: any) {
   // طرد مقابل طرد هو استبدال مخزني فقط ولا ينتج عنه أي حركة مالية،
   // مهما كانت حالة الشحنة لدى المعيار.
   if (order.mayar_parcel_type === "exchange") return;
+
+  /*
+    هذه الحالة فقط:
+    طلب معيار بقيمة تحصيل صفر، وقد أُضيفت قيمته مسبقًا إلى الرصيد
+    باعتبارها حوالة مصرفية. عند "تم التسليم" نحدّث الحالة فقط،
+    ولا نضيف أي قيمة مالية مرة ثانية.
+  */
+  if (order.mayar_bank_transfer_recorded === true) {
+    if (order.status !== "delivered") {
+      const { error: updateError } = await supabaseAdmin
+        .from("orders")
+        .update({
+          status: "delivered",
+        })
+        .eq("id", order.id);
+
+      if (updateError) {
+        throw new Error(
+          `تعذر تحديث حالة الطلب المحول مصرفيًا ${order.order_code}: ${updateError.message}`
+        );
+      }
+    }
+
+    return;
+  }
 
   const savedAmount = Number(order.total_amount || 0);
   const catalogAmount = (order.order_items || []).reduce((sum: number, item: any) => {
