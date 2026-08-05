@@ -51,6 +51,18 @@ function getOrderCode(transaction: any) {
   return getRelatedOrder(transaction)?.order_code || "—";
 }
 
+function getMayarCode(transaction: any) {
+  const order = getRelatedOrder(transaction);
+  const metadata = transaction?.metadata || {};
+
+  return (
+    order?.mayar_code ||
+    metadata?.mayar_code ||
+    metadata?.mayar_shipment_code ||
+    "—"
+  );
+}
+
 function displayDescription(transaction: any) {
   const description = String(transaction.description || "").trim();
 
@@ -160,6 +172,7 @@ export default function FinancialReportsPage() {
           orders(
             id,
             order_code,
+            mayar_code,
             total_amount,
             total_cost,
             order_items(quantity)
@@ -760,6 +773,7 @@ export default function FinancialReportsPage() {
                 <th className="p-4">الاتجاه</th>
                 <th className="p-4">التصنيف</th>
                 <th className="p-4">السبب</th>
+                <th className="p-4">كود المعيار</th>
                 <th className="p-4">القيمة</th>
                 <th className="p-4">المصدر</th>
               </tr>
@@ -768,13 +782,13 @@ export default function FinancialReportsPage() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={7} className="p-8 text-center text-neutral-400">
+                  <td colSpan={8} className="p-8 text-center text-neutral-400">
                     جاري تحميل التقرير...
                   </td>
                 </tr>
               ) : filteredTransactions.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="p-8 text-center text-neutral-400">
+                  <td colSpan={8} className="p-8 text-center text-neutral-400">
                     لا توجد حركات مالية ضمن الفترة المحددة
                   </td>
                 </tr>
@@ -808,6 +822,9 @@ export default function FinancialReportsPage() {
                     </td>
                     <td className="p-4">{transaction.category}</td>
                     <td className="p-4">{displayDescription(transaction)}</td>
+                    <td dir="ltr" className="p-4 text-right font-bold">
+                      {getMayarCode(transaction)}
+                    </td>
                     <td className="p-4 font-black">
                       {transaction.direction === "credit" ? "+" : "-"}
                       {money(transaction.amount)}
@@ -860,6 +877,7 @@ export default function FinancialReportsPage() {
                     <th className="p-4">المتجر</th>
                     <th className="p-4">نوع الحركة</th>
                     <th className="p-4">كود الطلب</th>
+                    <th className="p-4">كود المعيار</th>
                     <th className="p-4">البيان</th>
                     <th className="p-4">إضافة</th>
                     <th className="p-4">خصم</th>
@@ -872,7 +890,7 @@ export default function FinancialReportsPage() {
                   {balanceRows.length === 0 ? (
                     <tr>
                       <td
-                        colSpan={9}
+                        colSpan={10}
                         className="p-8 text-center text-neutral-400"
                       >
                         لا توجد حركات مالية
@@ -905,6 +923,9 @@ export default function FinancialReportsPage() {
                         </td>
                         <td dir="ltr" className="p-4 text-right font-bold">
                           {getOrderCode(transaction)}
+                        </td>
+                        <td dir="ltr" className="p-4 text-right font-bold">
+                          {getMayarCode(transaction)}
                         </td>
                         <td className="p-4">
                           {displayDescription(transaction)}
@@ -1094,13 +1115,19 @@ export default function FinancialReportsPage() {
               </select>
 
               <input
-                type="number"
-                min="0"
-                step="0.01"
-                className="rounded-xl bg-neutral-800 p-4"
+                type="text"
+                inputMode="decimal"
+                dir="ltr"
+                className="rounded-xl bg-neutral-800 p-4 text-left"
                 placeholder="القيمة"
                 value={movementAmount}
-                onChange={(event) => setMovementAmount(event.target.value)}
+                onChange={(event) => {
+                  const cleanedValue = event.target.value
+                    .replace(/[^0-9.]/g, "")
+                    .replace(/(\..*)\./g, "$1");
+
+                  setMovementAmount(cleanedValue);
+                }}
               />
 
               <textarea
