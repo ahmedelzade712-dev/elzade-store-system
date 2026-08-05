@@ -458,10 +458,34 @@ export async function POST(request: Request) {
     createdCustomerId = customer.id;
 
     const isExchange = mayarParcelType === "exchange";
+
+    /*
+      منطق شحن استبدال طرابلس الخاصة:
+
+      - الزبونة تتحمل الشحن:
+        نحفظ قيمة الشحن داخل shipping_fee حتى تظهر على البوليصة.
+        لا تخصم أي قيمة من رصيد المتجر.
+
+      - المتجر يتحمل الشحن:
+        نحفظ shipping_fee = 0 حتى تظهر البوليصة بقيمة صفر.
+        ملف المالية يخصم 15 د.ل رسوم توصيل و5 د.ل مكافأة مندوب.
+    */
+    const exchangeShippingFee =
+      isExchange && isPrivateTripoli
+        ? shippingPayer === "customer"
+          ? shippingFee
+          : 0
+        : 0;
+
     const exchangeStoreShippingFee =
-      isExchange && shippingPayer === "store" ? 15 : 0;
+      isExchange && isPrivateTripoli && shippingPayer === "store"
+        ? 15
+        : 0;
+
     const exchangeCourierReward =
-      isExchange && shippingPayer === "store" ? 5 : 0;
+      isExchange && isPrivateTripoli && shippingPayer === "store"
+        ? 5
+        : 0;
 
     let orderCode = "";
     let order: any = null;
@@ -489,7 +513,7 @@ export async function POST(request: Request) {
           total_amount: isExchange ? 0 : totalAmount,
           total_cost: isExchange ? 0 : totalCost,
           shipping_fee: isExchange
-            ? exchangeStoreShippingFee
+            ? exchangeShippingFee
             : isPrivateTripoli
               ? shippingFee
               : 0,

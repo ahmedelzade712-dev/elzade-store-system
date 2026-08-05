@@ -142,21 +142,103 @@ export async function POST(request: Request) {
       Boolean(order.exchange_original_order_id);
 
     /*
-      طلب الاستبدال في طرابلس الخاصة لا ينشئ أي حركة مالية:
-      - لا إضافة مبيعات إلى الرصيد
-      - لا خصم رسوم توصيل
-      - لا خصم مكافأة مندوب
+      طلب الاستبدال في طرابلس الخاصة:
+
+      - لا توجد مبيعات للمنتجات نهائيًا.
+      - إذا كانت shipping_fee أكبر من صفر:
+        الزبونة تتحمل التوصيل، فلا توجد أي حركة مالية.
+      - إذا كانت shipping_fee تساوي صفر:
+        المتجر يتحمل التوصيل، فنخصم 15 د.ل رسوم توصيل
+        و5 د.ل مكافأة مندوب فقط.
     */
     if (isExchangeOrder) {
+      const exchangeShippingFee = numberValue(order.shipping_fee);
+
+      const courierReward = await getSetting(
+        "private_tripoli_courier_reward",
+        5
+      );
+
+      const standardShippingFee = await getSetting(
+        "private_tripoli_standard_shipping_fee",
+        15
+      );
+
+      const occurredAt =
+        order.printed_at || new Date().toISOString();
+
+      const storePaysExchangeShipping =
+        exchangeShippingFee === 0;
+
+      if (storePaysExchangeShipping) {
+        await insertTransactionIfMissing({
+          store_id: order.store_id,
+          order_id: order.id,
+          transaction_type: "expense",
+          direction: "debit",
+          category: "رسوم التوصيل",
+          amount: standardShippingFee,
+          description:
+            `خصم رسوم توصيل طلب الاستبدال ${order.order_code} من الرصيد`,
+          source_key:
+            `order:${order.id}:private_tripoli_exchange_shipping_fee`,
+          is_system_generated: true,
+          occurred_at: occurredAt,
+          metadata: {
+            order_code: order.order_code,
+            shipping_company: "private_tripoli",
+            order_type: "exchange",
+            shipping_payer: "store",
+            charged_to_store: standardShippingFee,
+          },
+        });
+
+        if (courierReward > 0) {
+          await insertTransactionIfMissing({
+            store_id: order.store_id,
+            order_id: order.id,
+            transaction_type: "courier_reward",
+            direction: "debit",
+            category: "مكافآت المناديب",
+            amount: courierReward,
+            description:
+              `مكافأة مندوب طلب الاستبدال ${order.order_code}`,
+            source_key:
+              `order:${order.id}:private_tripoli_exchange_courier_reward`,
+            is_system_generated: true,
+            occurred_at: occurredAt,
+            metadata: {
+              order_code: order.order_code,
+              shipping_company: "private_tripoli",
+              order_type: "exchange",
+              shipping_payer: "store",
+              courier_reward: courierReward,
+            },
+          });
+        }
+      }
+
+      const shippingDeduction =
+        storePaysExchangeShipping
+          ? standardShippingFee
+          : 0;
+
+      const rewardDeduction =
+        storePaysExchangeShipping
+          ? courierReward
+          : 0;
+
       return NextResponse.json({
         ok: true,
-        skipped: true,
+        skipped_sale: true,
         reason: "exchange_order",
         order_code: order.order_code,
         sale_amount: 0,
-        shipping_deduction: 0,
-        courier_reward: 0,
-        balance_effect: 0,
+        shipping_fee_entered: exchangeShippingFee,
+        shipping_deduction: shippingDeduction,
+        courier_reward: rewardDeduction,
+        balance_effect:
+          0 - shippingDeduction - rewardDeduction,
       });
     }
 
