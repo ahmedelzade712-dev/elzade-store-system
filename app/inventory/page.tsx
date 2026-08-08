@@ -121,25 +121,29 @@ export default function InventoryPage() {
   }, [items, search, storeFilter, typeFilter]);
 
   const stats = useMemo(() => {
-    const totalPieces = items.reduce(
+    const statsItems = storeFilter
+      ? items.filter((item) => item.stores?.name === storeFilter)
+      : items;
+
+    const totalPieces = statsItems.reduce(
       (sum, item) => sum + Number(item.stock_quantity || 0),
       0
     );
 
-    const availablePieces = items
+    const availablePieces = statsItems
       .filter((i) => i.is_active && i.stock_quantity > 0)
       .reduce((sum, item) => sum + Number(item.stock_quantity || 0), 0);
 
-    const lowVariants = items.filter(
+    const lowVariants = statsItems.filter(
       (i) => i.is_active && i.stock_quantity > 0 && i.stock_quantity <= 5
     ).length;
 
-    const outVariants = items.filter(
+    const outVariants = statsItems.filter(
       (i) => i.is_active && i.stock_quantity <= 0
     ).length;
 
     return { totalPieces, availablePieces, lowVariants, outVariants };
-  }, [items]);
+  }, [items, storeFilter]);
 
   function getStockStatus(item: any) {
     if (!item.is_active) return { text: "موقوف", className: "text-neutral-400" };
