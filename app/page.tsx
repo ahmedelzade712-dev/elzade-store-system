@@ -2,12 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { getCurrentUserProfile } from "@/lib/auth";
-import { supabase } from "@/lib/supabase";
 
 export default function HomePage() {
   const [profile, setProfile] = useState<any>(null);
-  const [trialOpenCount, setTrialOpenCount] = useState(0);
-  const [trialLateCount, setTrialLateCount] = useState(0);
 
   useEffect(() => {
     async function loadProfileAndCounts() {
@@ -20,31 +17,6 @@ export default function HomePage() {
 
       setProfile(result.profile);
 
-      let openQuery = supabase
-        .from("orders")
-        .select("id", { count: "exact", head: true })
-        .eq("is_trial_order", true)
-        .eq("trial_status", "open");
-
-      let lateQuery = supabase
-        .from("orders")
-        .select("id", { count: "exact", head: true })
-        .eq("is_trial_order", true)
-        .eq("trial_status", "open")
-        .lte("trial_due_at", new Date().toISOString());
-
-      const profileData = result.profile;
-
-      if (profileData && profileData.role !== "admin") {
-        openQuery = openQuery.eq("store_id", profileData.store_id);
-        lateQuery = lateQuery.eq("store_id", profileData.store_id);
-      }
-
-      const { count: openCount } = await openQuery;
-      const { count: lateCount } = await lateQuery;
-
-      setTrialOpenCount(openCount || 0);
-      setTrialLateCount(lateCount || 0);
     }
 
     loadProfileAndCounts();
@@ -149,22 +121,10 @@ export default function HomePage() {
         )}
 
         <a
-          href="/trial-orders"
-          className="relative rounded-2xl border border-neutral-800 bg-neutral-900 p-6 text-center font-bold"
+          href="/private-tripoli"
+          className="rounded-2xl border border-neutral-800 bg-neutral-900 p-6 text-center font-bold"
         >
-          طلبات التجربة
-
-          {trialLateCount > 0 && (
-            <span className="absolute -left-3 -top-3 flex h-9 min-w-9 items-center justify-center rounded-full bg-red-600 px-3 text-sm font-bold text-white">
-              {trialLateCount}
-            </span>
-          )}
-
-          {trialLateCount === 0 && trialOpenCount > 0 && (
-            <span className="absolute -left-3 -top-3 flex h-9 min-w-9 items-center justify-center rounded-full bg-yellow-500 px-3 text-sm font-bold text-black">
-              {trialOpenCount}
-            </span>
-          )}
+          طرابلس خاصة
         </a>
 
         <a
