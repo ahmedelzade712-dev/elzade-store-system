@@ -47,28 +47,6 @@ export default function OrdersPage() {
     return Number(order.shipping_fee || 0);
   }
 
-  async function recordPrivateTripoliFinancials(orderId: string) {
-    const response = await fetch("/api/financial/private-tripoli-sale", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        order_id: orderId,
-      }),
-    });
-
-    const result = await response.json();
-
-    if (!response.ok || !result.ok) {
-      throw new Error(
-        result.error || "فشل تسجيل رصيد طلب طرابلس الخاصة"
-      );
-    }
-
-    return result;
-  }
-
   useEffect(() => {
     loadData();
   }, []);
@@ -307,7 +285,8 @@ export default function OrdersPage() {
     if (status === "new") return "جديد";
     if (status === "processing") return "قيد التجهيز";
     if (status === "sold") return "مباع";
-    if (status === "shipped") return "تم الشحن";
+    if (status === "shipped") return "جاري الشحن";
+    if (status === "partial_delivered") return "تسليم جزئي";
     if (status === "delivered") return "تم التسليم";
     if (status === "returned") return "مرتجع";
     return status;
@@ -318,6 +297,7 @@ export default function OrdersPage() {
     if (status === "processing") return "text-yellow-400";
     if (status === "sold") return "text-green-400";
     if (status === "shipped") return "text-purple-400";
+    if (status === "partial_delivered") return "text-orange-400";
     if (status === "delivered") return "text-green-400";
     if (status === "returned") return "text-red-400";
     return "text-neutral-400";
@@ -1854,7 +1834,7 @@ export default function OrdersPage() {
     if (!preparedPrintBatch || finalizingPrint) return;
 
     setFinalizingPrint(true);
-    setMessage("جاري تحديث الطلبات والرصيد بعد تأكيد الطباعة...");
+    setMessage("جاري تحديث حالات الطلبات بعد تأكيد الطباعة...");
 
     try {
       for (const order of preparedPrintBatch.orders) {
@@ -1862,7 +1842,10 @@ export default function OrdersPage() {
         const shippingCompany = privateTripoli
           ? "private_tripoli"
           : "mayar";
-        const nextStatus = privateTripoli ? "delivered" : "shipped";
+        // طرابلس خاصة لا تعتبر مباعة عند بدء التجهيز.
+        // بعد الطباعة تنتقل فقط إلى "جاري الشحن"، والتسوية المالية تتم
+        // لاحقًا من صفحة طرابلس خاصة حسب نتيجة التوصيل الفعلية.
+        const nextStatus = "shipped";
 
         const { error } = await supabase
           .from("orders")
@@ -1882,16 +1865,13 @@ export default function OrdersPage() {
           );
         }
 
-        if (privateTripoli) {
-          await recordPrivateTripoliFinancials(order.id);
-        }
       }
 
       setPreparedPrintBatch(null);
       setA4PrintDialogCompleted(false);
       setLabelsPrintDialogCompleted(false);
       setMessage(
-        "تم تأكيد الطباعة وتحديث الحالات والرصيد بنجاح."
+        "تم تأكيد الطباعة وتحديث الحالات بنجاح. طلبات طرابلس خاصة أصبحت جاري الشحن دون أي حركة مالية."
       );
       await loadData();
     } catch (error: any) {
@@ -1914,7 +1894,14 @@ export default function OrdersPage() {
           </p>
         </div>
 
-        <div className="flex gap-3">
+        <div className="flex flex-wrap gap-3">
+          <a
+            href="/private-tripoli"
+            className="rounded-xl bg-purple-500 px-5 py-3 font-bold text-white"
+          >
+            طرابلس خاصة
+          </a>
+
           <button
             onClick={handleStartPreparing}
             className="rounded-xl bg-green-500 px-5 py-3 font-bold text-black"
@@ -1959,7 +1946,9 @@ export default function OrdersPage() {
         >
           <option value="">كل حالات الطلب</option>
           <option value="new">جديد</option>
+          <option value="shipped">جاري الشحن</option>
           <option value="delivered">تم التسليم</option>
+          <option value="partial_delivered">تسليم جزئي</option>
           <option value="returned">مرتجع</option>
         </select>
 
