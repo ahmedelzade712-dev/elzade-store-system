@@ -5,6 +5,7 @@ import { getCurrentUserProfile } from "@/lib/auth";
 
 export default function HomePage() {
   const [profile, setProfile] = useState<any>(null);
+  const [alertsCount, setAlertsCount] = useState(0);
 
   useEffect(() => {
     async function loadProfileAndCounts() {
@@ -17,6 +18,24 @@ export default function HomePage() {
 
       setProfile(result.profile);
 
+      try {
+        const storeParam =
+          result.profile?.role !== "admin" && result.profile?.store_id
+            ? `?store_id=${encodeURIComponent(result.profile.store_id)}`
+            : "";
+
+        const response = await fetch(`/api/order-alerts${storeParam}`, {
+          cache: "no-store",
+        });
+
+        const data = await response.json();
+
+        if (response.ok && data.ok) {
+          setAlertsCount(Number(data.counts?.total || 0));
+        }
+      } catch {
+        setAlertsCount(0);
+      }
     }
 
     loadProfileAndCounts();
@@ -125,6 +144,19 @@ export default function HomePage() {
           className="rounded-2xl border border-neutral-800 bg-neutral-900 p-6 text-center font-bold"
         >
           طرابلس خاصة
+        </a>
+
+        <a
+          href="/order-alerts"
+          className="relative rounded-2xl border border-red-900 bg-neutral-900 p-6 text-center font-bold"
+        >
+          تنبيهات الطلبات
+
+          {alertsCount > 0 && (
+            <span className="absolute -left-3 -top-3 flex h-9 min-w-9 items-center justify-center rounded-full bg-red-600 px-3 text-sm font-bold text-white">
+              {alertsCount}
+            </span>
+          )}
         </a>
 
         <a
