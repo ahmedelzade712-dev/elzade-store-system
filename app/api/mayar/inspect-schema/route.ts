@@ -1,193 +1,141 @@
 import { NextResponse } from "next/server";
 import { mayarGraphql, mayarLogin } from "@/lib/mayar";
 
-function unwrapNamedType(type: any): string | null {
-  let current = type;
+type ShipmentRow = {
+  id: number;
+  code: string;
+  refNumber?: string | null;
+  createdAt: string;
+  updatedAt?: string | null;
+  deliveredOrReturnedDate?: string | null;
+  piecesCount: number;
+  returnPiecesCount?: number | null;
+  collected: boolean;
+  price: number;
+  amount: number;
+  deliveryFees: number;
+  collectionFees: number;
+  totalAmount: number;
+  deliveredAmount: number;
+  returnedValue: number;
+  collectedFees: number;
+  collectedAmount: number;
+  pendingCollectionAmount: number;
+  customerDue: number;
+  status: {
+    code?: string | null;
+    name?: string | null;
+  } | null;
+};
 
-  while (current) {
-    if (current.name) return current.name;
-    current = current.ofType;
-  }
+async function findShipmentByCode(token: string, search: string) {
+  const query = `
+    query InspectShipmentFinancials(
+      $input: ListShipmentsFilterInput
+      $first: Int!
+      $page: Int
+    ) {
+      listShipments(input: $input, first: $first, page: $page) {
+        data {
+          id
+          code
+          refNumber
+          createdAt
+          updatedAt
+          deliveredOrReturnedDate
 
-  return null;
+          piecesCount
+          returnPiecesCount
+          collected
+
+          price
+          amount
+          deliveryFees
+          collectionFees
+          totalAmount
+          deliveredAmount
+          returnedValue
+          collectedFees
+          collectedAmount
+          pendingCollectionAmount
+          customerDue
+
+          status {
+            code
+            name
+          }
+        }
+      }
+    }
+  `;
+
+  const data = await mayarGraphql<any>(
+    query,
+    {
+      input: { search },
+      first: 20,
+      page: 1,
+    },
+    token
+  );
+
+  const rows: ShipmentRow[] = data?.listShipments?.data || [];
+
+  const exact = rows.find(
+    (row) =>
+      String(row.code || "").trim().toUpperCase() === search.toUpperCase() ||
+      String(row.refNumber || "").trim().toUpperCase() === search.toUpperCase()
+  );
+
+  return exact || rows[0] || null;
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
+    const { searchParams } = new URL(request.url);
+
+    const rawCodes = String(
+      searchParams.get("codes") || "N6816481,N6820730"
+    );
+
+    const codes = rawCodes
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean)
+      .slice(0, 10);
+
+    if (codes.length === 0) {
+      throw new Error("أدخل كود شحنة واحدًا على الأقل");
+    }
+
     const login = await mayarLogin();
 
-    const queryTypeInspection = `
-      query InspectListShipmentsQuery {
-        queryType: __type(name: "Query") {
-          fields {
-            name
-            type {
-              kind
-              name
-              ofType {
-                kind
-                name
-                ofType {
-                  kind
-                  name
-                  ofType {
-                    kind
-                    name
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    `;
+    const results = [];
 
-    const queryData = await mayarGraphql<any>(
-      queryTypeInspection,
-      {},
-      login.token
-    );
+    for (const code of codes) {
+      const shipment = await findShipmentByCode(login.token, code);
 
-    const listShipmentsField = (queryData.queryType?.fields || []).find(
-      (field: any) => field.name === "listShipments"
-    );
-
-    if (!listShipmentsField) {
-      throw new Error("لم يتم العثور على listShipments داخل مخطط المعيار");
+      results.push({
+        searched_code: code,
+        found: Boolean(shipment),
+        shipment,
+      });
     }
-
-    const paginatorTypeName = unwrapNamedType(listShipmentsField.type);
-
-    if (!paginatorTypeName) {
-      throw new Error("تعذر معرفة نوع نتيجة listShipments");
-    }
-
-    const paginatorInspection = `
-      query InspectPaginatorType($typeName: String!) {
-        inspectedType: __type(name: $typeName) {
-          name
-          fields {
-            name
-            type {
-              kind
-              name
-              ofType {
-                kind
-                name
-                ofType {
-                  kind
-                  name
-                  ofType {
-                    kind
-                    name
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    `;
-
-    const paginatorData = await mayarGraphql<any>(
-      paginatorInspection,
-      { typeName: paginatorTypeName },
-      login.token
-    );
-
-    const dataField = (paginatorData.inspectedType?.fields || []).find(
-      (field: any) => field.name === "data"
-    );
-
-    if (!dataField) {
-      throw new Error(
-        `لم يتم العثور على الحقل data داخل النوع ${paginatorTypeName}`
-      );
-    }
-
-    const shipmentTypeName = unwrapNamedType(dataField.type);
-
-    if (!shipmentTypeName) {
-      throw new Error("تعذر معرفة نوع الشحنة داخل listShipments.data");
-    }
-
-    const shipmentInspection = `
-      query InspectShipmentType($typeName: String!) {
-        inspectedType: __type(name: $typeName) {
-          name
-          description
-          fields {
-            name
-            description
-            type {
-              kind
-              name
-              ofType {
-                kind
-                name
-                ofType {
-                  kind
-                  name
-                  ofType {
-                    kind
-                    name
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    `;
-
-    const shipmentData = await mayarGraphql<any>(
-      shipmentInspection,
-      { typeName: shipmentTypeName },
-      login.token
-    );
-
-    const fields = shipmentData.inspectedType?.fields || [];
-
-    const relevantFields = fields.filter((field: any) => {
-      const name = String(field.name || "").toLowerCase();
-      const description = String(field.description || "").toLowerCase();
-      const text = `${name} ${description}`;
-
-      return (
-        text.includes("price") ||
-        text.includes("amount") ||
-        text.includes("collect") ||
-        text.includes("paid") ||
-        text.includes("payment") ||
-        text.includes("cash") ||
-        text.includes("delivery") ||
-        text.includes("delivered") ||
-        text.includes("piece") ||
-        text.includes("return") ||
-        text.includes("partial")
-      );
-    });
 
     return NextResponse.json({
       ok: true,
-      mode: "safe_shipment_schema_inspection_no_database_changes",
-      list_shipments_return_type: paginatorTypeName,
-      shipment_type: shipmentTypeName,
-      relevant_fields: relevantFields,
-      all_shipment_fields: fields.map((field: any) => ({
-        name: field.name,
-        description: field.description || null,
-        type: field.type,
-      })),
+      mode: "safe_read_only_mayar_financial_comparison",
+      results,
       note:
-        "هذا الفحص يقرأ مخطط GraphQL فقط ولا يعدل أي طلب أو رصيد أو مخزون.",
+        "قراءة فقط من API المعيار. لا يتم تعديل أي طلب أو رصيد أو مخزون أو بيانات.",
     });
   } catch (error: any) {
     return NextResponse.json(
       {
         ok: false,
-        error: error?.message || "فشل فحص حقول شحنة المعيار",
-        note: "لم يتم تعديل أي بيانات في Supabase أو المعيار.",
+        error: error?.message || "فشل فحص القيم المالية لشحنات المعيار",
+        note:
+          "لم يتم تعديل أي بيانات في Supabase أو المعيار.",
       },
       { status: 500 }
     );
