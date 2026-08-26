@@ -1,33 +1,26 @@
 import { NextResponse } from "next/server";
 import { mayarGraphql, mayarLogin } from "@/lib/mayar";
 
+function unwrapNamedType(type: any): string | null {
+  let current = type;
+
+  while (current) {
+    if (current.name) return current.name;
+    current = current.ofType;
+  }
+
+  return null;
+}
+
 export async function GET() {
   try {
     const login = await mayarLogin();
 
-    const query = `
-      query InspectMayarSchema {
+    const queryTypeInspection = `
+      query InspectListShipmentsQuery {
         queryType: __type(name: "Query") {
-          name
           fields {
             name
-            description
-            args {
-              name
-              description
-              type {
-                kind
-                name
-                ofType {
-                  kind
-                  name
-                  ofType {
-                    kind
-                    name
-                  }
-                }
-              }
-            }
             type {
               kind
               name
@@ -42,95 +35,6 @@ export async function GET() {
                     name
                   }
                 }
-              }
-            }
-          }
-        }
-
-        listZonesFilterInput: __type(name: "ListZonesFilterInput") {
-          name
-          inputFields {
-            name
-            description
-            defaultValue
-            type {
-              kind
-              name
-              ofType {
-                kind
-                name
-                ofType {
-                  kind
-                  name
-                }
-              }
-            }
-          }
-        }
-
-        dropdownEntry: __type(name: "DropDownEntry") {
-          name
-          fields {
-            name
-            description
-            type {
-              kind
-              name
-              ofType {
-                kind
-                name
-              }
-            }
-          }
-        }
-
-        zone: __type(name: "Zone") {
-          name
-          fields {
-            name
-            description
-            type {
-              kind
-              name
-              ofType {
-                kind
-                name
-                ofType {
-                  kind
-                  name
-                }
-              }
-            }
-          }
-        }
-
-        city: __type(name: "City") {
-          name
-          fields {
-            name
-            description
-            type {
-              kind
-              name
-              ofType {
-                kind
-                name
-              }
-            }
-          }
-        }
-
-        area: __type(name: "Area") {
-          name
-          fields {
-            name
-            description
-            type {
-              kind
-              name
-              ofType {
-                kind
-                name
               }
             }
           }
@@ -138,46 +42,152 @@ export async function GET() {
       }
     `;
 
-    const data = await mayarGraphql<any>(query, {}, login.token);
-
-    const queryFields = data.queryType?.fields || [];
-
-    const potentiallyRelevantQueries = queryFields.filter(
-      (field: any) => {
-        const value = String(field.name || "").toLowerCase();
-
-        return (
-          value.includes("zone") ||
-          value.includes("city") ||
-          value.includes("area") ||
-          value.includes("branch") ||
-          value.includes("country")
-        );
-      }
+    const queryData = await mayarGraphql<any>(
+      queryTypeInspection,
+      {},
+      login.token
     );
+
+    const listShipmentsField = (queryData.queryType?.fields || []).find(
+      (field: any) => field.name === "listShipments"
+    );
+
+    if (!listShipmentsField) {
+      throw new Error("لم يتم العثور على listShipments داخل مخطط المعيار");
+    }
+
+    const paginatorTypeName = unwrapNamedType(listShipmentsField.type);
+
+    if (!paginatorTypeName) {
+      throw new Error("تعذر معرفة نوع نتيجة listShipments");
+    }
+
+    const paginatorInspection = `
+      query InspectPaginatorType($typeName: String!) {
+        inspectedType: __type(name: $typeName) {
+          name
+          fields {
+            name
+            type {
+              kind
+              name
+              ofType {
+                kind
+                name
+                ofType {
+                  kind
+                  name
+                  ofType {
+                    kind
+                    name
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    `;
+
+    const paginatorData = await mayarGraphql<any>(
+      paginatorInspection,
+      { typeName: paginatorTypeName },
+      login.token
+    );
+
+    const dataField = (paginatorData.inspectedType?.fields || []).find(
+      (field: any) => field.name === "data"
+    );
+
+    if (!dataField) {
+      throw new Error(
+        `لم يتم العثور على الحقل data داخل النوع ${paginatorTypeName}`
+      );
+    }
+
+    const shipmentTypeName = unwrapNamedType(dataField.type);
+
+    if (!shipmentTypeName) {
+      throw new Error("تعذر معرفة نوع الشحنة داخل listShipments.data");
+    }
+
+    const shipmentInspection = `
+      query InspectShipmentType($typeName: String!) {
+        inspectedType: __type(name: $typeName) {
+          name
+          description
+          fields {
+            name
+            description
+            type {
+              kind
+              name
+              ofType {
+                kind
+                name
+                ofType {
+                  kind
+                  name
+                  ofType {
+                    kind
+                    name
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    `;
+
+    const shipmentData = await mayarGraphql<any>(
+      shipmentInspection,
+      { typeName: shipmentTypeName },
+      login.token
+    );
+
+    const fields = shipmentData.inspectedType?.fields || [];
+
+    const relevantFields = fields.filter((field: any) => {
+      const name = String(field.name || "").toLowerCase();
+      const description = String(field.description || "").toLowerCase();
+      const text = `${name} ${description}`;
+
+      return (
+        text.includes("price") ||
+        text.includes("amount") ||
+        text.includes("collect") ||
+        text.includes("paid") ||
+        text.includes("payment") ||
+        text.includes("cash") ||
+        text.includes("delivery") ||
+        text.includes("delivered") ||
+        text.includes("piece") ||
+        text.includes("return") ||
+        text.includes("partial")
+      );
+    });
 
     return NextResponse.json({
       ok: true,
-      mode: "safe_schema_inspection_no_database_changes",
-      potentially_relevant_queries: potentiallyRelevantQueries,
-      list_zones_filter_input: data.listZonesFilterInput,
-      dropdown_entry: data.dropdownEntry,
-      zone_type: data.zone,
-      city_type: data.city,
-      area_type: data.area,
-      all_query_fields: queryFields.map((field: any) => field.name),
+      mode: "safe_shipment_schema_inspection_no_database_changes",
+      list_shipments_return_type: paginatorTypeName,
+      shipment_type: shipmentTypeName,
+      relevant_fields: relevantFields,
+      all_shipment_fields: fields.map((field: any) => ({
+        name: field.name,
+        description: field.description || null,
+        type: field.type,
+      })),
       note:
-        "هذا فحص آمن لمخطط GraphQL فقط. لم يتم تعديل أي جدول أو بيانات في Supabase أو المعيار.",
+        "هذا الفحص يقرأ مخطط GraphQL فقط ولا يعدل أي طلب أو رصيد أو مخزون.",
     });
   } catch (error: any) {
     return NextResponse.json(
       {
         ok: false,
-        error:
-          error.message ||
-          "Unknown Mayar GraphQL schema inspection error",
-        note:
-          "إذا ظهرت رسالة أن introspection غير مسموح، سننتقل مباشرة إلى فحص شحنة ناجحة لمدينة من المدن المتأثرة.",
+        error: error?.message || "فشل فحص حقول شحنة المعيار",
+        note: "لم يتم تعديل أي بيانات في Supabase أو المعيار.",
       },
       { status: 500 }
     );
