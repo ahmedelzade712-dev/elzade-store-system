@@ -216,9 +216,36 @@ async function recordDeliveredMayarOrder(shipment: any) {
     );
   }, 0);
 
-  // إذا كان مبلغ التحصيل صفرًا في طلب تسليم كامل، فهذا طلب مدفوع مسبقًا
-  // بالحوالة المصرفية، ولذلك نضيف سعر المنتجات الحالي من جدول المنتجات.
-  const amount = savedAmount > 0 ? savedAmount : catalogAmount;
+  /*
+    تسليم المعيار له حالتان ماليتان فقط:
+
+    1) تسليم كامل:
+       نحافظ على المنطق السابق كما هو، ونضيف قيمة الطلب الكاملة.
+
+    2) تسليم جزئي:
+       المعيار يعيد customerDue بقيمة المنتجات التي يستحقها المتجر فعليًا
+       بعد استبعاد القطع غير المستلمة ورسوم التوصيل.
+
+    مثال حقيقي من API المعيار:
+      price = 450
+      returnedValue = 225
+      customerDue = 225
+
+    لذلك لا يجوز استخدام total_amount الكامل في التسليم الجزئي.
+  */
+  const originalOrderAmount = savedAmount > 0 ? savedAmount : catalogAmount;
+  const mayarPrice = Number(shipment.price || 0);
+  const returnedValue = Number(shipment.returnedValue || 0);
+  const customerDue = Number(shipment.customerDue || 0);
+
+  const isPartialDelivery =
+    returnedValue > 0 ||
+    (mayarPrice > 0 && customerDue >= 0 && customerDue < mayarPrice);
+
+  const amount = isPartialDelivery
+    ? customerDue
+    : originalOrderAmount;
+
   if (amount <= 0) return;
 
   const occurredAt =
@@ -233,7 +260,9 @@ async function recordDeliveredMayarOrder(shipment: any) {
     direction: "credit",
     category: "مبيعات",
     amount,
-    description: `إضافة قيمة طلب المعيار ${order.order_code} بعد التسليم`,
+    description: isPartialDelivery
+      ? `إضافة قيمة طلب المعيار ${order.order_code} بعد التسليم الجزئي`
+      : `إضافة قيمة طلب المعيار ${order.order_code} بعد التسليم`,
     source_key: `order:${order.id}:mayar_delivered_sale`,
     is_system_generated: true,
     occurred_at: occurredAt,
@@ -242,12 +271,21 @@ async function recordDeliveredMayarOrder(shipment: any) {
       mayar_code: shipment.code,
       mayar_status_code: shipment.status?.code || "",
       mayar_status_name: shipment.status?.name || "",
-      amount_source: savedAmount > 0 ? "order_total" : "product_catalog",
+      delivery_result: isPartialDelivery ? "partial" : "full",
+      amount_source: isPartialDelivery
+        ? "mayar_customer_due"
+        : savedAmount > 0
+          ? "order_total"
+          : "product_catalog",
+      mayar_price: mayarPrice,
+      mayar_returned_value: returnedValue,
+      mayar_customer_due: customerDue,
       prepaid_bank_transfer: savedAmount === 0,
     },
   });
 
-  const largeOrderFee = calculateMayarLargeOrderFee(amount);
+  // نحافظ على منطق رسوم الطلبات الكبيرة السابق بدون تغييره.
+  const largeOrderFee = calculateMayarLargeOrderFee(originalOrderAmount);
 
   if (largeOrderFee > 0) {
     await insertFinancialTransactionIfMissing({
@@ -264,7 +302,7 @@ async function recordDeliveredMayarOrder(shipment: any) {
       metadata: {
         order_code: order.order_code,
         mayar_code: shipment.code,
-        order_amount: amount,
+        order_amount: originalOrderAmount,
       },
     });
   }
@@ -330,6 +368,9 @@ export async function GET(request: Request) {
             inWarehouse
             attempts
             cancelled
+            price
+            returnedValue
+            customerDue
             status {
               code
               name
