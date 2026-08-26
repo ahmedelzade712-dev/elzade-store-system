@@ -121,54 +121,6 @@ async function findOrderByCode(code: string) {
   return data;
 }
 
-async function insertFinancialReversalIfMissing(transaction: any, order: any) {
-  const sourceKey = `return:${order.id}:reverse:${transaction.id}`;
-
-  const { error } = await supabaseAdmin
-    .from("financial_transactions")
-    .insert({
-      store_id: order.store_id,
-      order_id: order.id,
-      transaction_type: "return",
-      direction: transaction.direction === "credit" ? "debit" : "credit",
-      category:
-        transaction.transaction_type === "courier_reward"
-          ? "استرجاع مكافأة المندوب"
-          : `عكس ${transaction.category || "حركة مالية"}`,
-      amount: Number(transaction.amount || 0),
-      description:
-        transaction.transaction_type === "courier_reward"
-          ? `إعادة مكافأة مندوب الطلب ${order.order_code} إلى الرصيد`
-          : `عكس الأثر المالي للطلب ${order.order_code}`,
-      source_key: sourceKey,
-      is_system_generated: true,
-      reversed_transaction_id: transaction.id,
-      occurred_at: new Date().toISOString(),
-      metadata: {
-        order_code: order.order_code,
-        original_transaction_id: transaction.id,
-        original_source_key: transaction.source_key,
-      },
-    });
-
-  if (error && error.code !== "23505") {
-    throw new Error("خطأ في عكس الحركة المالية: " + error.message);
-  }
-}
-
-
-async function insertPartialReturnTransaction(order: any, returnedAmount: number) {
-  const sourceKey = `return:${order.id}:partial-products`;
-  const { error } = await supabaseAdmin.from("financial_transactions").insert({
-    store_id: order.store_id, order_id: order.id, transaction_type: "return", direction: "debit",
-    category: "استرجاع جزئي", amount: Number(returnedAmount || 0),
-    description: `خصم قيمة القطع الراجعة جزئيًا من الطلب ${order.order_code}`,
-    source_key: sourceKey, is_system_generated: true, occurred_at: new Date().toISOString(),
-    metadata: { order_code: order.order_code, return_type: "partial", returned_amount: Number(returnedAmount || 0) },
-  });
-  if (error && error.code !== "23505") throw new Error("خطأ في تسجيل الاسترجاع الجزئي: " + error.message);
-}
-
 async function findPendingExchangeForOriginalOrder(originalOrderId: string) {
   const { data: exchangeOrder, error: exchangeError } = await supabaseAdmin
     .from("orders")
@@ -272,8 +224,7 @@ export async function GET(request: Request) {
         : null,
       already_returned: isExchangeReturn
         ? false
-        : Boolean(existingReturn?.inventory_restored) &&
-          Boolean(existingReturn?.financial_reversed),
+        : Boolean(existingReturn?.inventory_restored),
       return_record: existingReturn || null,
     });
   } catch (error: any) {
@@ -411,7 +362,7 @@ export async function POST(request: Request) {
           .update({
             return_reason: reason || "استلام قطعة مستبدلة",
             inventory_restored: true,
-            financial_reversed: true,
+            financial_reversed: false,
           })
           .eq("id", existingExchangeReturn.id);
 
@@ -426,7 +377,7 @@ export async function POST(request: Request) {
             mayar_code: order.mayar_code || order.mayar_shipment_code || null,
             return_reason: reason || "استلام قطعة مستبدلة",
             inventory_restored: true,
-            financial_reversed: true,
+            financial_reversed: false,
           });
 
         if (createReturnError) throw new Error(createReturnError.message);
@@ -448,8 +399,11 @@ export async function POST(request: Request) {
       .from("order_returns").select("*").eq("order_id", order.id).maybeSingle();
 
     if (returnReadError) throw new Error(returnReadError.message);
-    if (returnRecord?.inventory_restored || returnRecord?.financial_reversed) {
-      return NextResponse.json({ ok: false, error: "تم تنفيذ استرجاع لهذا الطلب سابقًا" }, { status: 409 });
+    if (returnRecord?.inventory_restored) {
+      return NextResponse.json(
+        { ok: false, error: "تم إرجاع منتجات هذا الطلب إلى المخزون سابقًا" },
+        { status: 409 }
+      );
     }
 
     const itemById = new Map<string, any>(
@@ -473,7 +427,6 @@ export async function POST(request: Request) {
     const totalOrderedQuantity = normalized.items.reduce((sum: number, item: any) => sum + Number(item.quantity || 0), 0);
     const totalReturnedQuantity = selectedItems.reduce((sum: number, item: any) => sum + Number(item.return_quantity || 0), 0);
     const isFullReturn = totalReturnedQuantity >= totalOrderedQuantity;
-    const returnedAmount = selectedItems.reduce((sum: number, item: any) => sum + Number(item.return_quantity || 0) * Number(item.unit_price || 0), 0);
 
     if (!returnRecord) {
       const { data: createdReturn, error: createReturnError } = await supabaseAdmin.from("order_returns").insert({
@@ -506,26 +459,22 @@ export async function POST(request: Request) {
       if (movementError) throw new Error("تمت إعادة المخزون لكن فشل تسجيل حركة المخزون: " + movementError.message);
     }
 
-    if (isFullReturn) {
-      const { data: originalTransactions, error: transactionsError } = await supabaseAdmin.from("financial_transactions")
-        .select(`id, transaction_type, direction, category, amount, source_key`).eq("order_id", order.id).neq("transaction_type", "return");
-      if (transactionsError) throw new Error(transactionsError.message);
-      for (const transaction of originalTransactions || []) await insertFinancialReversalIfMissing(transaction, order);
-    } else {
-      await insertPartialReturnTransaction(order, returnedAmount);
-    }
-
     const { error: returnFlagError } = await supabaseAdmin.from("order_returns").update({
       return_reason: reason || (isFullReturn ? "استرجاع كامل" : "استرجاع جزئي"),
-      inventory_restored: true, financial_reversed: true,
+      inventory_restored: true, financial_reversed: false,
     }).eq("id", returnRecord.id);
     if (returnFlagError) throw new Error(returnFlagError.message);
 
     return NextResponse.json({
       ok: true,
-      message: isFullReturn ? "تم الاسترجاع الكامل وإعادة المنتجات والمكافأة" : "تم الاسترجاع الجزئي وإعادة القطع المحددة وتعديل الرصيد",
-      order: normalized, is_full_return: isFullReturn, returned_amount: returnedAmount,
-      returned_quantity: totalReturnedQuantity, inventory_restored: true, financial_reversed: true,
+      message: isFullReturn
+        ? "تمت إعادة جميع منتجات الطلب إلى المخزون فقط دون أي تعديل مالي"
+        : "تمت إعادة القطع المحددة إلى المخزون فقط دون أي تعديل مالي",
+      order: normalized,
+      is_full_return: isFullReturn,
+      returned_quantity: totalReturnedQuantity,
+      inventory_restored: true,
+      financial_reversed: false,
     });
   } catch (error: any) {
     return NextResponse.json(

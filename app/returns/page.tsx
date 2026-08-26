@@ -89,16 +89,6 @@ export default function ReturnsPage() {
     [selectedReturnItems]
   );
 
-  const selectedAmount = useMemo(
-    () =>
-      selectedReturnItems.reduce(
-        (sum: number, item: any) =>
-          sum + Number(item.quantity || 0) * Number(item.unit_price || 0),
-        0
-      ),
-    [selectedReturnItems]
-  );
-
   async function runSearch(rawValue: string) {
     const value = rawValue.trim();
 
@@ -171,10 +161,10 @@ export default function ReturnsPage() {
 
     const confirmed = window.confirm(
       isExchangeReturn
-        ? `الطلب ${order.order_code} هو القطعة القديمة في استبدال ${exchangeOrder?.order_code || ""}. سيتم فقط إعادة القطعة المستبدلة إلى المخزون دون خصم أي مبلغ من الرصيد. هل وصلت القطعة فعليًا؟`
+        ? `الطلب ${order.order_code} هو القطعة القديمة في استبدال ${exchangeOrder?.order_code || ""}. سيتم فقط إعادة القطعة إلى المخزون دون أي تعديل مالي. هل وصلت القطعة فعليًا؟`
         : returnMode === "partial"
-          ? `هل أنت متأكد من استرجاع ${selectedQuantity} قطعة من الطلب ${order.order_code} بقيمة ${money(selectedAmount)}؟ لن تتم إعادة مكافأة المندوب.`
-          : `هل أنت متأكد من الاسترجاع الكامل للطلب ${order.order_code} وإعادة جميع المنتجات إلى المخزون؟`
+          ? `هل أنت متأكد من إعادة ${selectedQuantity} قطعة من الطلب ${order.order_code} إلى المخزون فقط؟ لن يتم تعديل الرصيد أو التقارير المالية.`
+          : `هل أنت متأكد من إعادة جميع منتجات الطلب ${order.order_code} إلى المخزون فقط؟ لن يتم تعديل الرصيد أو التقارير المالية.`
     );
 
     if (!confirmed) return;
@@ -253,6 +243,9 @@ export default function ReturnsPage() {
           <h1 className="text-3xl font-bold">استرجاع الطلب</h1>
           <p className="mt-2 text-neutral-400">
             ابحث بكود الطلب أو كود المعيار أو امسح QR
+          </p>
+          <p className="mt-2 font-bold text-yellow-300">
+            هذه الصفحة تعيد المنتجات إلى المخزون فقط ولا تعدل الرصيد أو التقارير المالية.
           </p>
         </div>
 
@@ -391,7 +384,7 @@ export default function ReturnsPage() {
                 >
                   <p className="text-lg font-bold">استرجاع كامل</p>
                   <p className="mt-1 text-sm text-neutral-400">
-                    إعادة جميع المنتجات وعكس البيع كاملًا وإعادة مكافأة المندوب.
+                    إعادة جميع المنتجات إلى المخزون فقط دون أي تعديل مالي.
                   </p>
                 </button>
 
@@ -406,7 +399,7 @@ export default function ReturnsPage() {
                 >
                   <p className="text-lg font-bold">استرجاع جزئي</p>
                   <p className="mt-1 text-sm text-neutral-400">
-                    اختيار القطع والكميات الراجعة فقط، دون إعادة مكافأة المندوب.
+                    اختيار القطع والكميات الراجعة وإعادتها إلى المخزون فقط دون أي تعديل مالي.
                   </p>
                 </button>
               </div>
@@ -514,19 +507,11 @@ export default function ReturnsPage() {
             </div>
 
             {!isExchangeReturn && returnMode === "partial" && (
-              <div className="mt-5 grid gap-3 md:grid-cols-2">
-                <div className="rounded-xl border border-neutral-700 bg-neutral-950 p-4">
-                  <p className="text-sm text-neutral-400">عدد القطع المختارة</p>
-                  <p dir="ltr" className="mt-1 text-3xl font-black text-right">
-                    {selectedQuantity}
-                  </p>
-                </div>
-                <div className="rounded-xl border border-neutral-700 bg-neutral-950 p-4">
-                  <p className="text-sm text-neutral-400">قيمة القطع الراجعة</p>
-                  <p dir="ltr" className="mt-1 text-3xl font-black text-right">
-                    {money(selectedAmount)}
-                  </p>
-                </div>
+              <div className="mt-5 rounded-xl border border-neutral-700 bg-neutral-950 p-4">
+                <p className="text-sm text-neutral-400">عدد القطع المختارة للعودة إلى المخزون</p>
+                <p dir="ltr" className="mt-1 text-3xl font-black text-right">
+                  {selectedQuantity}
+                </p>
               </div>
             )}
           </section>
