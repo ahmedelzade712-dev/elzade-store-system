@@ -4,6 +4,12 @@ import { useEffect, useMemo, useState } from "react";
 import { getCurrentUserProfile } from "@/lib/auth";
 import { supabase } from "@/lib/supabase";
 
+const emptyCourierForm = {
+  id: "",
+  name: "",
+  is_active: true,
+};
+
 const emptyForm = {
   id: "",
   full_name: "",
@@ -30,6 +36,10 @@ function formatDate(value: string | null) {
 export default function EmployeesPage() {
   const [profile, setProfile] = useState<any>(null);
   const [employees, setEmployees] = useState<any[]>([]);
+  const [couriers, setCouriers] = useState<any[]>([]);
+  const [courierForm, setCourierForm] = useState<any>(emptyCourierForm);
+  const [showCourierForm, setShowCourierForm] = useState(false);
+  const [courierSaving, setCourierSaving] = useState(false);
   const [stores, setStores] = useState<any[]>([]);
   const [form, setForm] = useState<any>(emptyForm);
   const [showForm, setShowForm] = useState(false);
@@ -76,21 +86,37 @@ export default function EmployeesPage() {
       return;
     }
 
-    const response = await fetch("/api/employees", {
-      headers: { Authorization: `Bearer ${token}` },
-      cache: "no-store",
-    });
+    const [employeesResponse, couriersResponse] = await Promise.all([
+      fetch("/api/employees", {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: "no-store",
+      }),
+      fetch("/api/couriers", {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: "no-store",
+      }),
+    ]);
 
-    const data = await response.json();
+    const [employeesData, couriersData] = await Promise.all([
+      employeesResponse.json(),
+      couriersResponse.json(),
+    ]);
 
-    if (!response.ok || !data.ok) {
-      setMessage(data.error || "فشل تحميل الموظفين");
+    if (!employeesResponse.ok || !employeesData.ok) {
+      setMessage(employeesData.error || "فشل تحميل الموظفين");
+      setLoading(false);
+      return;
+    }
+
+    if (!couriersResponse.ok || !couriersData.ok) {
+      setMessage(couriersData.error || "فشل تحميل المناديب");
       setLoading(false);
       return;
     }
 
     setStores(storesData || []);
-    setEmployees(data.employees || []);
+    setEmployees(employeesData.employees || []);
+    setCouriers(couriersData.couriers || []);
     setLoading(false);
   }
 
@@ -112,6 +138,78 @@ export default function EmployeesPage() {
         .includes(value)
     );
   }, [employees, search]);
+
+  function openCreateCourier() {
+    setCourierForm(emptyCourierForm);
+    setShowCourierForm(true);
+    setMessage("");
+  }
+
+  function openEditCourier(courier: any) {
+    setCourierForm({
+      id: courier.id,
+      name: courier.name || "",
+      is_active: courier.is_active !== false,
+    });
+    setShowCourierForm(true);
+    setMessage("");
+  }
+
+  async function saveCourier() {
+    if (courierSaving) return;
+    if (!courierForm.name.trim()) return setMessage("اسم المندوب مطلوب");
+
+    setCourierSaving(true);
+    setMessage("");
+
+    try {
+      const token = await getToken();
+      const response = await fetch("/api/couriers", {
+        method: courierForm.id ? "PATCH" : "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(courierForm),
+      });
+
+      const data = await response.json();
+      if (!response.ok || !data.ok) {
+        throw new Error(data.error || "فشل حفظ المندوب");
+      }
+
+      setShowCourierForm(false);
+      setCourierForm(emptyCourierForm);
+      setMessage(data.message);
+      await loadPage();
+    } catch (error: any) {
+      setMessage(error.message || "حدث خطأ");
+    } finally {
+      setCourierSaving(false);
+    }
+  }
+
+  async function deleteCourier(courier: any) {
+    if (!window.confirm(`هل تريد حذف المندوب: ${courier.name}؟`)) return;
+
+    try {
+      const token = await getToken();
+      const response = await fetch(`/api/couriers?id=${encodeURIComponent(courier.id)}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      const data = await response.json();
+      if (!response.ok || !data.ok) {
+        throw new Error(data.error || "فشل حذف المندوب");
+      }
+
+      setMessage(data.message);
+      await loadPage();
+    } catch (error: any) {
+      setMessage(error.message || "حدث خطأ");
+    }
+  }
 
   function openCreate() {
     setForm(emptyForm);
@@ -208,6 +306,68 @@ export default function EmployeesPage() {
         </div>
       </div>
 
+      <section className="mb-8 rounded-2xl border border-neutral-800 bg-neutral-900 p-5">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-2xl font-bold">مناديب طرابلس الخاصة</h2>
+            <p className="mt-1 text-sm text-neutral-400">إضافة وتعديل وحذف أسماء المناديب الذين يظهرون عند إنشاء الطلب.</p>
+          </div>
+          <button
+            type="button"
+            onClick={openCreateCourier}
+            className="rounded-xl bg-blue-500 px-5 py-3 font-bold text-white"
+          >
+            + إضافة مندوب
+          </button>
+        </div>
+
+        <div className="overflow-x-auto rounded-xl border border-neutral-800">
+          <table className="w-full min-w-[700px] text-right">
+            <thead className="bg-neutral-800 text-sm text-neutral-300">
+              <tr>
+                <th className="p-4">الترتيب</th>
+                <th className="p-4">اسم المندوب</th>
+                <th className="p-4">الحالة</th>
+                <th className="p-4">الإجراء</th>
+              </tr>
+            </thead>
+            <tbody>
+              {couriers.length === 0 ? (
+                <tr><td colSpan={4} className="p-6 text-center text-neutral-400">لا يوجد مناديب</td></tr>
+              ) : (
+                couriers.map((courier) => (
+                  <tr key={courier.id} className="border-t border-neutral-800">
+                    <td className="p-4">مندوب {courier.sort_order}</td>
+                    <td className="p-4 font-bold">{courier.name}</td>
+                    <td className={`p-4 font-bold ${courier.is_active ? "text-green-400" : "text-red-400"}`}>
+                      {courier.is_active ? "نشط" : "موقوف"}
+                    </td>
+                    <td className="p-4">
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => openEditCourier(courier)}
+                          className="rounded-lg border border-neutral-700 px-4 py-2 font-bold"
+                        >
+                          تعديل
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => deleteCourier(courier)}
+                          className="rounded-lg border border-red-800 px-4 py-2 font-bold text-red-300"
+                        >
+                          حذف
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
       <div className="mb-6 rounded-2xl border border-neutral-800 bg-neutral-900 p-5">
         <input
           className="w-full rounded-xl bg-neutral-800 p-4"
@@ -261,6 +421,51 @@ export default function EmployeesPage() {
           </tbody>
         </table>
       </div>
+
+      {showCourierForm && (
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-black/70 p-4">
+          <div className="mx-auto my-16 w-full max-w-lg rounded-2xl bg-neutral-900 p-6">
+            <div className="mb-5 flex items-center justify-between gap-4">
+              <h2 className="text-2xl font-bold">{courierForm.id ? "تعديل المندوب" : "إضافة مندوب"}</h2>
+              <button
+                type="button"
+                onClick={() => setShowCourierForm(false)}
+                className="rounded-lg border border-neutral-700 px-4 py-2"
+              >
+                إغلاق
+              </button>
+            </div>
+
+            <label className="mb-2 block text-sm text-neutral-300">اسم المندوب</label>
+            <input
+              className="w-full rounded-xl bg-neutral-800 p-4"
+              placeholder="مثال: أحمد"
+              value={courierForm.name}
+              onChange={(e) => setCourierForm({ ...courierForm, name: e.target.value })}
+            />
+
+            {courierForm.id && (
+              <label className="mt-4 flex items-center gap-3 rounded-xl bg-neutral-800 p-4">
+                <input
+                  type="checkbox"
+                  checked={courierForm.is_active}
+                  onChange={(e) => setCourierForm({ ...courierForm, is_active: e.target.checked })}
+                />
+                <span>المندوب نشط ويظهر في صفحة إضافة الطلب</span>
+              </label>
+            )}
+
+            <button
+              type="button"
+              onClick={saveCourier}
+              disabled={courierSaving}
+              className="mt-5 w-full rounded-xl bg-white p-4 font-bold text-black disabled:opacity-50"
+            >
+              {courierSaving ? "جاري الحفظ..." : "حفظ المندوب"}
+            </button>
+          </div>
+        </div>
+      )}
 
       {showForm && (
         <div className="fixed inset-0 z-50 overflow-y-auto bg-black/70 p-4">

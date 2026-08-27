@@ -7,6 +7,8 @@ import { getCurrentUserProfile } from "@/lib/auth";
 export default function NewOrderPage() {
   const [profile, setProfile] = useState<any>(null);
   const [stores, setStores] = useState<any[]>([]);
+  const [couriers, setCouriers] = useState<any[]>([]);
+  const [courierId, setCourierId] = useState("");
   const [cities, setCities] = useState<any[]>([]);
   const [areas, setAreas] = useState<any[]>([]);
   const [variants, setVariants] = useState<any[]>([]);
@@ -143,6 +145,20 @@ export default function NewOrderPage() {
         .from("stores")
         .select("id, name")
         .order("name");
+
+      const { data: couriersData, error: couriersError } = await supabase
+        .from("couriers")
+        .select("id, name, sort_order, is_active")
+        .eq("is_active", true)
+        .order("sort_order", { ascending: true });
+
+      if (couriersError) {
+        setMessage("خطأ في تحميل المناديب: " + couriersError.message);
+        return;
+      }
+
+      setCouriers(couriersData || []);
+      setCourierId((current) => current || couriersData?.[0]?.id || "");
 
       const { data: citiesData, error: citiesError } = await supabase
         .from("cities")
@@ -696,6 +712,11 @@ export default function NewOrderPage() {
       return;
     }
 
+    if (isPrivateTripoliSelected() && !courierId) {
+      setMessage("لا يوجد مندوب نشط. أضف مندوبًا من صفحة الموظفين أولاً.");
+      return;
+    }
+
     if (isMayarShippingSelected) {
       if (!selectedCity?.mayar_zone_id) {
         setMessage("المدينة غير مرتبطة بمعرّف المعيار. أعد مزامنة المدن.");
@@ -771,6 +792,7 @@ export default function NewOrderPage() {
           metaLink,
           whatsappLink,
           storeId,
+          courierId: isPrivateTripoliSelected() ? courierId : null,
           notes,
           createdBy: profile.id,
           isScheduled,
@@ -861,6 +883,7 @@ export default function NewOrderPage() {
       setPhone2("");
       setCityId("");
       setAreaId("");
+      setCourierId(couriers[0]?.id || "");
       setCitySearch("");
       setAreaSearch("");
       setCityDropdownOpen(false);
@@ -1122,6 +1145,27 @@ export default function NewOrderPage() {
               <span className="mx-2 font-bold">{selectedCity.name}</span>
               /
               <span className="mx-2 font-bold">{selectedArea.name}</span>
+            </div>
+          )}
+
+          {isPrivateTripoliSelected() && (
+            <div className="grid gap-2">
+              <label className="text-sm font-bold text-neutral-300">المندوب</label>
+              <select
+                className="w-full rounded-xl bg-neutral-900 p-4"
+                value={courierId}
+                onChange={(e) => setCourierId(e.target.value)}
+              >
+                {couriers.length === 0 ? (
+                  <option value="">لا يوجد مندوب نشط</option>
+                ) : (
+                  couriers.map((courier) => (
+                    <option key={courier.id} value={courier.id}>
+                      {courier.name}
+                    </option>
+                  ))
+                )}
+              </select>
             </div>
           )}
 

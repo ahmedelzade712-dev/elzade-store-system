@@ -101,6 +101,7 @@ export async function POST(request: Request) {
     const metaLink = asText(body.metaLink) || null;
     const whatsappLink = asText(body.whatsappLink) || null;
     const storeId = asText(body.storeId);
+    const requestedCourierId = asText(body.courierId) || null;
     const notes = asText(body.notes);
     const createdBy = asText(body.createdBy);
     const isScheduled = Boolean(body.isScheduled);
@@ -177,6 +178,38 @@ export async function POST(request: Request) {
       : destination.cities;
     const isPrivateTripoli = city?.name === "طرابلس (خاصة)";
     const isMayar = !isPrivateTripoli;
+
+    let privateTripoliCourierId: string | null = null;
+
+    if (isPrivateTripoli) {
+      if (requestedCourierId) {
+        const { data: courier, error: courierError } = await supabaseAdmin
+          .from("couriers")
+          .select("id, is_active")
+          .eq("id", requestedCourierId)
+          .maybeSingle();
+
+        if (courierError || !courier || courier.is_active === false) {
+          throw new Error("المندوب المختار غير موجود أو غير نشط");
+        }
+
+        privateTripoliCourierId = courier.id;
+      } else {
+        const { data: defaultCourier, error: courierError } = await supabaseAdmin
+          .from("couriers")
+          .select("id")
+          .eq("is_active", true)
+          .order("sort_order", { ascending: true })
+          .limit(1)
+          .maybeSingle();
+
+        if (courierError || !defaultCourier) {
+          throw new Error("لا يوجد مندوب نشط لطلبات طرابلس الخاصة");
+        }
+
+        privateTripoliCourierId = defaultCourier.id;
+      }
+    }
 
     if (isMayar && (!city?.mayar_zone_id || !destination.mayar_subzone_id)) {
       throw new Error("المدينة أو المنطقة غير مرتبطة ببيانات المعيار");
@@ -520,6 +553,7 @@ export async function POST(request: Request) {
         .insert({
           store_id: storeId,
           customer_id: customer.id,
+          courier_id: isPrivateTripoli ? privateTripoliCourierId : null,
           order_code: orderCode,
           status: "new",
           is_trial_order:
