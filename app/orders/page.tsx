@@ -122,6 +122,8 @@ export default function OrdersPage() {
         mayar_sent_at,
         store_id,
         customer_id,
+        courier_id,
+        couriers(id, name, sort_order),
         stores(id, name),
         customers(
           id,
@@ -849,6 +851,26 @@ export default function OrdersPage() {
     return isPrivateTripoli(order) ? "مندوب خاص - طرابلس" : "شركة المعيار";
   }
 
+  function getPrintDayAndDate() {
+    const now = new Date();
+    const arabicDays = [
+      "الأحد",
+      "الاثنين",
+      "الثلاثاء",
+      "الأربعاء",
+      "الخميس",
+      "الجمعة",
+      "السبت",
+    ];
+
+    const day = arabicDays[now.getDay()];
+    const date = `${String(now.getDate()).padStart(2, "0")}/${String(
+      now.getMonth() + 1
+    ).padStart(2, "0")}/${now.getFullYear()}`;
+
+    return { day, date };
+  }
+
   function buildPrintHtml(
     ordersToPrint: any[],
     printMode: "a4" | "warehouse" | "preparation" | "courier" | "labels"
@@ -1040,39 +1062,96 @@ export default function OrdersPage() {
       isPrivateTripoli(order)
     );
 
-    const courierRowsHtml = courierOrders
-      .map((order) => {
-        const finalAmount =
-          Number(order.total_amount || 0) + getOrderShippingFee(order);
+    const courierGroups = new Map<string, { courier: any; orders: any[] }>();
+
+    courierOrders.forEach((order) => {
+      const courier = order.couriers || null;
+      const groupKey = String(order.courier_id || courier?.id || "default");
+      const existing = courierGroups.get(groupKey);
+
+      if (existing) {
+        existing.orders.push(order);
+      } else {
+        courierGroups.set(groupKey, {
+          courier: courier || { name: "المندوب 1", sort_order: 1 },
+          orders: [order],
+        });
+      }
+    });
+
+    const sortedCourierGroups = Array.from(courierGroups.values()).sort(
+      (a, b) =>
+        Number(a.courier?.sort_order || 999) -
+        Number(b.courier?.sort_order || 999)
+    );
+
+    const { day: printDay, date: printDate } = getPrintDayAndDate();
+
+    const courierDocumentsHtml = sortedCourierGroups
+      .map(({ courier, orders: groupOrders }) => {
+        const courierRowsHtml = groupOrders
+          .map((order) => {
+            const finalAmount =
+              Number(order.total_amount || 0) + getOrderShippingFee(order);
+
+            return `
+              <tr>
+                <td class="code">${order.order_code || "-"}</td>
+                <td class="phone">
+                  <div class="courier-phone-list">
+                    <span>${order.customers?.phone || "-"}</span>
+                    ${
+                      order.customers?.phone2
+                        ? `<span>${order.customers.phone2}</span>`
+                        : ""
+                    }
+                  </div>
+                </td>
+                <td class="area">${order.customers?.areas?.name || "-"}</td>
+                <td class="money total-money">${finalAmount} د.ل</td>
+                <td class="notes">${order.notes || ""}</td>
+              </tr>
+            `;
+          })
+          .join("");
+
+        const courierTotalAmount = groupOrders.reduce((sum, order) => {
+          return (
+            sum +
+            Number(order.total_amount || 0) +
+            getOrderShippingFee(order)
+          );
+        }, 0);
 
         return `
-          <tr>
-            <td class="code">${order.order_code || "-"}</td>
-            <td class="phone">
-              <div class="courier-phone-list">
-                <span>${order.customers?.phone || "-"}</span>
-                ${
-                  order.customers?.phone2
-                    ? `<span>${order.customers.phone2}</span>`
-                    : ""
-                }
-              </div>
-            </td>
-            <td class="area">${order.customers?.areas?.name || "-"}</td>
-            <td class="money total-money">${finalAmount} د.ل</td>
-            <td class="notes">${order.notes || ""}</td>
-          </tr>
+          <section class="a4-document courier-document">
+            <h1>ورقة المندوب - طرابلس خاصة</h1>
+            <div class="courier-header-info">
+              <span><b>المندوب:</b> ${courier?.name || "المندوب 1"}</span>
+              <span><b>اليوم:</b> ${printDay}</span>
+              <span><b>التاريخ:</b> ${printDate}</span>
+            </div>
+            <div class="courier-summary">
+              <span>عدد الطلبات: ${groupOrders.length}</span>
+              <span>إجمالي التحصيل: ${courierTotalAmount} د.ل</span>
+            </div>
+
+            <table class="courier-table">
+              <thead>
+                <tr>
+                  <th>رقم الطلب</th>
+                  <th>رقم الهاتف</th>
+                  <th>المنطقة</th>
+                  <th>الإجمالي</th>
+                  <th>ملاحظات</th>
+                </tr>
+              </thead>
+              <tbody>${courierRowsHtml}</tbody>
+            </table>
+          </section>
         `;
       })
       .join("");
-
-    const courierTotalAmount = courierOrders.reduce((sum, order) => {
-      return (
-        sum +
-        Number(order.total_amount || 0) +
-        getOrderShippingFee(order)
-      );
-    }, 0);
 
     const warehouseBody = `
       <h1>ورقة المخزن</h1>
@@ -1097,33 +1176,6 @@ export default function OrdersPage() {
       <div class="orders-grid">${ordersHtml}</div>
     `;
 
-    const courierBody = `
-      <h1>ورقة المندوب - طرابلس خاصة</h1>
-      <div class="courier-summary">
-        <span>عدد طلبات طرابلس خاصة: ${courierOrders.length}</span>
-        <span>إجمالي التحصيل: ${courierTotalAmount} د.ل</span>
-      </div>
-
-      ${
-        courierRowsHtml
-          ? `
-            <table class="courier-table">
-              <thead>
-                <tr>
-                  <th>رقم الطلب</th>
-                  <th>رقم الهاتف</th>
-                  <th>المنطقة</th>
-                  <th>الإجمالي</th>
-                  <th>ملاحظات</th>
-                </tr>
-              </thead>
-              <tbody>${courierRowsHtml}</tbody>
-            </table>
-          `
-          : "<p>لا توجد طلبات طرابلس خاصة للمندوب.</p>"
-      }
-    `;
-
     const labelsBody = `
       <div class="thermal-labels">
         ${privateLabelsHtml}
@@ -1134,7 +1186,7 @@ export default function OrdersPage() {
     const combinedA4Body = `
       <section class="a4-document">${warehouseBody}</section>
       <section class="a4-document">${preparationBody}</section>
-      ${courierOrders.length > 0 ? `<section class="a4-document">${courierBody}</section>` : ""}
+      ${courierDocumentsHtml}
     `;
 
     const selectedBody =
@@ -1145,7 +1197,7 @@ export default function OrdersPage() {
           : printMode === "preparation"
             ? preparationBody
             : printMode === "courier"
-              ? courierBody
+              ? courierDocumentsHtml
               : labelsBody;
 
     const pageTitle =
@@ -1302,6 +1354,17 @@ export default function OrdersPage() {
               border-top: 1px solid #333;
               padding-top: 5px;
               margin-top: 7px !important;
+            }
+
+            .courier-header-info {
+              display: flex;
+              flex-wrap: wrap;
+              justify-content: space-between;
+              gap: 12px 24px;
+              margin: 0 0 10px;
+              padding: 10px 12px;
+              border: 1px solid #444;
+              font-size: 16px;
             }
 
             .courier-summary {
