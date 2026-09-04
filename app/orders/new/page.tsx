@@ -4,6 +4,49 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { getCurrentUserProfile } from "@/lib/auth";
 
+function normalizeWhatsappTarget(value: string) {
+  const raw = String(value || "").trim();
+
+  if (!raw) return "";
+
+  if (/^https?:\/\//i.test(raw)) {
+    return raw;
+  }
+
+  if (raw.startsWith("@")) {
+    const username = raw.slice(1).trim();
+
+    if (!username || /\s/.test(username)) return "";
+
+    return `https://wa.me/${encodeURIComponent(username)}`;
+  }
+
+  const compact = raw.replace(/\s+/g, "");
+
+  if (
+    /^[A-Za-z0-9._-]+$/.test(compact) &&
+    /[A-Za-z._-]/.test(compact)
+  ) {
+    return `https://wa.me/${encodeURIComponent(compact)}`;
+  }
+
+  const digits = raw.replace(/\D/g, "");
+
+  if (/^09\d{8}$/.test(digits)) {
+    return `https://wa.me/218${digits.slice(1)}`;
+  }
+
+  if (/^218\d{9}$/.test(digits)) {
+    return `https://wa.me/${digits}`;
+  }
+
+  if (/^\d{8,15}$/.test(digits)) {
+    return `https://wa.me/${digits}`;
+  }
+
+  return "";
+}
+
 export default function NewOrderPage() {
   const [profile, setProfile] = useState<any>(null);
   const [stores, setStores] = useState<any[]>([]);
@@ -776,6 +819,15 @@ export default function NewOrderPage() {
       }
     }
 
+    const normalizedWhatsappLink = whatsappLink.trim()
+      ? normalizeWhatsappTarget(whatsappLink)
+      : "";
+
+    if (whatsappLink.trim() && !normalizedWhatsappLink) {
+      setMessage("بيانات WhatsApp غير صحيحة. أدخل رقم واتساب أو @username أو رابط WhatsApp.");
+      return;
+    }
+
     try {
       const response = await fetch("/api/orders/create", {
         method: "POST",
@@ -790,7 +842,7 @@ export default function NewOrderPage() {
           areaId,
           address,
           metaLink,
-          whatsappLink,
+          whatsappLink: normalizedWhatsappLink,
           storeId,
           courierId: isPrivateTripoliSelected() ? courierId : null,
           notes,
@@ -1233,7 +1285,7 @@ export default function NewOrderPage() {
 
           <input
             className="rounded-xl bg-neutral-900 p-4"
-            placeholder="رابط WhatsApp"
+            placeholder="WhatsApp: رقم / @username / رابط"
             dir="ltr"
             value={whatsappLink}
             onChange={(e) => setWhatsappLink(e.target.value)}

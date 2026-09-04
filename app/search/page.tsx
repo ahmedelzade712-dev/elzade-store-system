@@ -4,6 +4,49 @@ import { FormEvent, useEffect, useRef, useState } from "react";
 import { getCurrentUserProfile } from "@/lib/auth";
 import QrScannerModal from "@/app/components/QrScannerModal";
 
+function normalizeWhatsappTarget(value: string) {
+  const raw = String(value || "").trim();
+
+  if (!raw) return "";
+
+  if (/^https?:\/\//i.test(raw)) {
+    return raw;
+  }
+
+  if (raw.startsWith("@")) {
+    const username = raw.slice(1).trim();
+
+    if (!username || /\s/.test(username)) return "";
+
+    return `https://wa.me/${encodeURIComponent(username)}`;
+  }
+
+  const compact = raw.replace(/\s+/g, "");
+
+  if (
+    /^[A-Za-z0-9._-]+$/.test(compact) &&
+    /[A-Za-z._-]/.test(compact)
+  ) {
+    return `https://wa.me/${encodeURIComponent(compact)}`;
+  }
+
+  const digits = raw.replace(/\D/g, "");
+
+  if (/^09\d{8}$/.test(digits)) {
+    return `https://wa.me/218${digits.slice(1)}`;
+  }
+
+  if (/^218\d{9}$/.test(digits)) {
+    return `https://wa.me/${digits}`;
+  }
+
+  if (/^\d{8,15}$/.test(digits)) {
+    return `https://wa.me/${digits}`;
+  }
+
+  return "";
+}
+
 function money(value: number) {
   return `${Number(value || 0).toLocaleString("en-US", {
     minimumFractionDigits: 2,
@@ -71,9 +114,9 @@ export default function OrderSearchPage() {
   }, []);
 
   async function runSearch(rawValue: string) {
-    const value = rawValue.trim().toLowerCase();
+    const raw = String(rawValue || "").trim();
 
-    if (!value) {
+    if (!raw) {
       setMessage("أدخل كود الطلب أو كود المعيار أو رقم الهاتف");
       return;
     }
@@ -83,20 +126,58 @@ export default function OrderSearchPage() {
     setResults([]);
 
     try {
-      const response = await fetch(
-        `/api/search-orders?q=${encodeURIComponent(value)}`,
-        {
-          cache: "no-store",
-        }
-      );
+      const normalized = raw.replace(/\s+/g, "");
+      const candidates: string[] = [];
 
-      const result = await response.json();
+      const addCandidate = (value: string) => {
+        const clean = String(value || "").trim();
+        if (clean && !candidates.includes(clean)) candidates.push(clean);
+      };
 
-      if (!response.ok || !result.ok) {
-        throw new Error(result.error || "فشل البحث");
+      // 1) البحث كما كتبه المستخدم.
+      addCandidate(normalized);
+
+      // 2) أكوادنا A / D / B ... بدون حساسية للحروف.
+      if (/^[a-zA-Z]+\d+$/.test(normalized)) {
+        addCandidate(normalized.toUpperCase());
+        addCandidate(normalized.toLowerCase());
       }
 
-      const foundResults = result.results || [];
+      // 3) كود المعيار: يقبل N أو n أو الرقم فقط.
+      if (/^[nN]\d+$/.test(normalized)) {
+        addCandidate(`N${normalized.slice(1)}`);
+        addCandidate(`n${normalized.slice(1)}`);
+      } else if (/^\d+$/.test(normalized)) {
+        // نحاول الرقم نفسه أولاً حتى يظل البحث برقم الهاتف يعمل،
+        // ثم نجربه ككود معيار بإضافة N تلقائياً.
+        addCandidate(`N${normalized}`);
+        addCandidate(`n${normalized}`);
+      }
+
+      const merged = new Map<string, any>();
+
+      for (const candidate of candidates) {
+        const response = await fetch(
+          `/api/search-orders?q=${encodeURIComponent(candidate)}`,
+          { cache: "no-store" }
+        );
+
+        const result = await response.json();
+
+        if (!response.ok || !result.ok) {
+          throw new Error(result.error || "فشل البحث");
+        }
+
+        for (const order of result.results || []) {
+          if (order?.id) merged.set(order.id, order);
+        }
+
+        // إذا وجدنا نتيجة دقيقة، لا نحتاج إكمال كل الاحتمالات.
+        if (merged.size > 0) break;
+      }
+
+      const foundResults = Array.from(merged.values());
+
       setResults(foundResults);
       setSelectedOrderId(foundResults.length === 1 ? foundResults[0].id : "");
 
@@ -350,7 +431,7 @@ export default function OrderSearchPage() {
 
                   {activeOrder.customer.whatsapp_link ? (
                     <a
-                      href={activeOrder.customer.whatsapp_link}
+                      href={normalizeWhatsappTarget(activeOrder.customer.whatsapp_link)}
                       target="_blank"
                       rel="noreferrer"
                       className="rounded-xl bg-green-600 px-5 py-3 font-bold"
