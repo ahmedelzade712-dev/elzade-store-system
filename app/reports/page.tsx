@@ -96,6 +96,86 @@ function displayMovementType(transaction: any) {
   return transaction.category || transaction.transaction_type || "حركة مالية";
 }
 
+function asOne(value: any) {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+function formatDateTime(value: string | null | undefined) {
+  if (!value) return "غير مسجل";
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "غير مسجل";
+
+  return date.toLocaleString("en-GB", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+}
+
+function orderStatusText(status: string) {
+  if (status === "delivered") return "تم التسليم";
+  if (status === "partial_delivered") return "تسليم جزئي";
+  return status || "—";
+}
+
+function orderPieces(order: any) {
+  return (order.order_items || []).reduce(
+    (sum: number, item: any) => sum + Number(item.quantity || 0),
+    0
+  );
+}
+
+function inferPartialDeliveredPieces(order: any): number | null {
+  if (order.status !== "partial_delivered") return orderPieces(order);
+
+  const targetCost = Number(order.total_cost || 0);
+  const units: number[] = [];
+
+  for (const item of order.order_items || []) {
+    const qty = Math.max(0, Math.trunc(Number(item.quantity || 0)));
+    const unitCost = Number(item.unit_cost || 0);
+
+    for (let i = 0; i < qty; i += 1) {
+      units.push(unitCost);
+    }
+  }
+
+  if (units.length === 0) return 0;
+
+  const scale = 100;
+  const target = Math.round(targetCost * scale);
+  const costs = units.map((value) => Math.round(value * scale));
+
+  const possible = new Map<number, Set<number>>();
+  possible.set(0, new Set([0]));
+
+  for (const cost of costs) {
+    const snapshot = Array.from(possible.entries()).map(
+      ([sum, counts]) => [sum, new Set(counts)] as const
+    );
+
+    for (const [sum, counts] of snapshot) {
+      const nextSum = sum + cost;
+      const nextCounts = possible.get(nextSum) || new Set<number>();
+
+      for (const count of counts) {
+        nextCounts.add(count + 1);
+      }
+
+      possible.set(nextSum, nextCounts);
+    }
+  }
+
+  const counts = possible.get(target);
+
+  if (!counts || counts.size !== 1) return null;
+  return Array.from(counts)[0];
+}
+
 export default function FinancialReportsPage() {
   const [profile, setProfile] = useState<any>(null);
   const [stores, setStores] = useState<any[]>([]);
@@ -122,6 +202,16 @@ export default function FinancialReportsPage() {
   const [showBalanceDetails, setShowBalanceDetails] = useState(false);
   const [showManualExpensesDetails, setShowManualExpensesDetails] =
     useState(false);
+  const [completedOrders, setCompletedOrders] = useState<any[]>([]);
+  const [showCapitalDetails, setShowCapitalDetails] = useState(false);
+  const [showOrdersDetails, setShowOrdersDetails] = useState(false);
+  const [showOrderSearch, setShowOrderSearch] = useState(false);
+  const [orderSearch, setOrderSearch] = useState("");
+  const [selectedOrder, setSelectedOrder] = useState<any>(null);
+  const [storeDetails, setStoreDetails] = useState<{
+    storeId: string;
+    type: "balance" | "expenses" | "orders";
+  } | null>(null);
 
   useEffect(() => {
     loadData();
@@ -149,6 +239,7 @@ export default function FinancialReportsPage() {
       { data: storesData, error: storesError },
       { data: transactionsData, error: transactionsError },
       { data: variantsData, error: variantsError },
+      { data: completedOrdersData, error: completedOrdersError },
     ] = await Promise.all([
       supabase.from("stores").select("id, name").order("name"),
       supabase
@@ -172,10 +263,15 @@ export default function FinancialReportsPage() {
           orders(
             id,
             order_code,
+            status,
+            created_at,
             mayar_code,
+            mayar_shipment_code,
+            mayar_live_status_name,
+            mayar_status_updated_at,
             total_amount,
             total_cost,
-            order_items(quantity)
+            order_items(quantity, unit_price, unit_cost)
           )
         `)
         .order("occurred_at", { ascending: false }),
@@ -189,6 +285,51 @@ export default function FinancialReportsPage() {
           stores(id, name)
         `)
         .eq("is_active", true),
+      supabase
+        .from("orders")
+        .select(`
+          id,
+          order_code,
+          store_id,
+          status,
+          total_amount,
+          total_cost,
+          shipping_fee,
+          notes,
+          created_at,
+          mayar_code,
+          mayar_shipment_code,
+          mayar_live_status_name,
+          mayar_status_updated_at,
+          stores(id, name),
+          couriers(id, name),
+          customers(
+            id,
+            name,
+            phone,
+            phone2,
+            address,
+            meta_link,
+            whatsapp_link,
+            cities(name),
+            areas(name)
+          ),
+          order_items(
+            id,
+            variant_id,
+            quantity,
+            unit_price,
+            unit_cost,
+            product_variants(
+              id,
+              color,
+              size,
+              products(id, name, model)
+            )
+          )
+        `)
+        .in("status", ["delivered", "partial_delivered"])
+        .order("created_at", { ascending: false }),
     ]);
 
     if (storesError) {
@@ -197,10 +338,13 @@ export default function FinancialReportsPage() {
       setMessage("خطأ في تحميل الحركات المالية: " + transactionsError.message);
     } else if (variantsError) {
       setMessage("خطأ في تحميل رأس المال: " + variantsError.message);
+    } else if (completedOrdersError) {
+      setMessage("خطأ في تحميل الطلبات المسلمة: " + completedOrdersError.message);
     } else {
       setStores(storesData || []);
       setTransactions(transactionsData || []);
       setVariants(variantsData || []);
+      setCompletedOrders(completedOrdersData || []);
     }
 
     setLoading(false);
@@ -230,21 +374,6 @@ export default function FinancialReportsPage() {
         return sum + (transaction.direction === "credit" ? amount : -amount);
       }, 0);
   }, [transactions, storeFilter]);
-
-  const periodSalesTransactions = useMemo(
-    () =>
-      filteredTransactions.filter(
-        (transaction) =>
-          transaction.transaction_type === "sale" &&
-          transaction.direction === "credit"
-      ),
-    [filteredTransactions]
-  );
-
-  const periodSales = periodSalesTransactions.reduce(
-    (sum, transaction) => sum + Number(transaction.amount || 0),
-    0
-  );
 
   const periodCourierRewards = filteredTransactions
     .filter(
@@ -300,42 +429,6 @@ export default function FinancialReportsPage() {
       .reverse();
   }, [balanceTransactions]);
 
-  const uniqueSoldOrders = useMemo(() => {
-    const map = new Map<string, any>();
-
-    periodSalesTransactions.forEach((transaction) => {
-      const order = Array.isArray(transaction.orders)
-        ? transaction.orders[0]
-        : transaction.orders;
-
-      if (order?.id) {
-        map.set(order.id, order);
-      }
-    });
-
-    return Array.from(map.values());
-  }, [periodSalesTransactions]);
-
-  const soldOrdersCount = uniqueSoldOrders.length;
-
-  const soldPiecesCount = uniqueSoldOrders.reduce((sum, order) => {
-    return (
-      sum +
-      (order.order_items || []).reduce(
-        (itemsSum: number, item: any) =>
-          itemsSum + Number(item.quantity || 0),
-        0
-      )
-    );
-  }, 0);
-
-  const goodsCost = uniqueSoldOrders.reduce(
-    (sum, order) => sum + Number(order.total_cost || 0),
-    0
-  );
-
-  const periodProfit = periodSales - goodsCost - periodCourierRewards;
-
   const currentCapital = variants
     .filter((variant) => !storeFilter || variant.store_id === storeFilter)
     .reduce(
@@ -346,70 +439,100 @@ export default function FinancialReportsPage() {
       0
     );
 
+  const currentStockPieces = variants
+    .filter((variant) => !storeFilter || variant.store_id === storeFilter)
+    .reduce(
+      (sum, variant) => sum + Number(variant.stock_quantity || 0),
+      0
+    );
+
+  function orderTransactions(orderId: string) {
+    return transactions.filter((transaction) => transaction.order_id === orderId);
+  }
+
+  function creditedAmountForOrder(orderId: string) {
+    return orderTransactions(orderId)
+      .filter(
+        (transaction) =>
+          transaction.transaction_type === "sale" &&
+          transaction.direction === "credit"
+      )
+      .reduce((sum, transaction) => sum + Number(transaction.amount || 0), 0);
+  }
+
+  function debitedAmountForOrder(orderId: string) {
+    return orderTransactions(orderId)
+      .filter((transaction) => transaction.direction === "debit")
+      .reduce((sum, transaction) => sum + Number(transaction.amount || 0), 0);
+  }
+
+  function deliveryTimeForOrder(order: any) {
+    const mayarStatus = String(order.mayar_live_status_name || "");
+
+    if (
+      order.mayar_status_updated_at &&
+      mayarStatus.includes("تم التسليم")
+    ) {
+      return order.mayar_status_updated_at;
+    }
+
+    const deliveryMovements = orderTransactions(order.id).filter((transaction) => {
+      const source = String(transaction.source_key || "");
+      const metadata = transaction.metadata || {};
+
+      if (metadata.payment_type === "bank_transfer") return false;
+
+      return (
+        source.includes("private_tripoli_sale") ||
+        source.includes("private_tripoli_courier_reward") ||
+        source.includes("mayar_sale") ||
+        source.includes("mayar_delivery") ||
+        source.includes("courier_reward")
+      );
+    });
+
+    if (deliveryMovements.length === 0) return null;
+
+    return [...deliveryMovements].sort(
+      (a, b) =>
+        new Date(b.occurred_at).getTime() - new Date(a.occurred_at).getTime()
+    )[0].occurred_at;
+  }
+
+  const completedOrdersWithMetrics = useMemo(() => {
+    return completedOrders.map((order) => ({
+      ...order,
+      creditedAmount: creditedAmountForOrder(order.id),
+      debitedAmount: debitedAmountForOrder(order.id),
+      deliveredPieces: inferPartialDeliveredPieces(order),
+      deliveryTime: deliveryTimeForOrder(order),
+    }));
+  }, [completedOrders, transactions]);
+
+  const creditedCompletedOrders = completedOrdersWithMetrics.filter(
+    (order) => Number(order.creditedAmount || 0) > 0
+  );
+
+  const totalCompletedOrders = creditedCompletedOrders.length;
+
+  const knownDeliveredPieces = creditedCompletedOrders.reduce(
+    (sum, order) =>
+      sum +
+      (typeof order.deliveredPieces === "number" ? order.deliveredPieces : 0),
+    0
+  );
+
+  const unresolvedPartialOrders = creditedCompletedOrders.filter(
+    (order) =>
+      order.status === "partial_delivered" &&
+      order.deliveredPieces === null
+  ).length;
+
   const storesReport = useMemo(() => {
     return stores.map((store) => {
       const storeTransactions = transactions.filter(
         (transaction) => transaction.store_id === store.id
       );
-
-      const storePeriodTransactions = storeTransactions.filter((transaction) =>
-        transactionDateMatches(transaction)
-      );
-
-      const saleTransactions = storePeriodTransactions.filter(
-        (transaction) =>
-          transaction.transaction_type === "sale" &&
-          transaction.direction === "credit"
-      );
-
-      const orderMap = new Map<string, any>();
-
-      saleTransactions.forEach((transaction) => {
-        const order = Array.isArray(transaction.orders)
-          ? transaction.orders[0]
-          : transaction.orders;
-
-        if (order?.id) orderMap.set(order.id, order);
-      });
-
-      const orders = Array.from(orderMap.values());
-
-      const sales = saleTransactions.reduce(
-        (sum, transaction) => sum + Number(transaction.amount || 0),
-        0
-      );
-
-      const courierRewards = storePeriodTransactions
-        .filter(
-          (transaction) =>
-            transaction.transaction_type === "courier_reward" &&
-            transaction.direction === "debit"
-        )
-        .reduce((sum, transaction) => sum + Number(transaction.amount || 0), 0);
-
-      const expenses = storePeriodTransactions
-        .filter(
-          (transaction) =>
-            transaction.direction === "debit" &&
-            transaction.is_system_generated === false
-        )
-        .reduce((sum, transaction) => sum + Number(transaction.amount || 0), 0);
-
-      const cost = orders.reduce(
-        (sum, order) => sum + Number(order.total_cost || 0),
-        0
-      );
-
-      const pieces = orders.reduce((sum, order) => {
-        return (
-          sum +
-          (order.order_items || []).reduce(
-            (itemsSum: number, item: any) =>
-              itemsSum + Number(item.quantity || 0),
-            0
-          )
-        );
-      }, 0);
 
       const balance = storeTransactions.reduce((sum, transaction) => {
         const amount = Number(transaction.amount || 0);
@@ -426,19 +549,67 @@ export default function FinancialReportsPage() {
           0
         );
 
+      const stockPieces = variants
+        .filter((variant) => variant.store_id === store.id)
+        .reduce(
+          (sum, variant) => sum + Number(variant.stock_quantity || 0),
+          0
+        );
+
+      const orders = creditedCompletedOrders.filter(
+        (order) => order.store_id === store.id
+      );
+
+      const deliveredPieces = orders.reduce(
+        (sum, order) =>
+          sum +
+          (typeof order.deliveredPieces === "number"
+            ? order.deliveredPieces
+            : 0),
+        0
+      );
+
+      const unresolvedPartials = orders.filter(
+        (order) =>
+          order.status === "partial_delivered" &&
+          order.deliveredPieces === null
+      ).length;
+
+      const expenses = storeTransactions
+        .filter(
+          (transaction) =>
+            transaction.direction === "debit" &&
+            transaction.is_system_generated === false
+        )
+        .reduce((sum, transaction) => sum + Number(transaction.amount || 0), 0);
+
       return {
         ...store,
         balance,
         capital,
-        sales,
-        profit: sales - cost - courierRewards,
-        expenses,
-        courierRewards,
+        stockPieces,
+        orders,
         ordersCount: orders.length,
-        pieces,
+        deliveredPieces,
+        unresolvedPartials,
+        expenses,
       };
     });
-  }, [stores, transactions, variants, dateFrom, dateTo]);
+  }, [stores, transactions, variants, completedOrdersWithMetrics]);
+
+  const searchedOrders = useMemo(() => {
+    const term = orderSearch.trim().toLowerCase();
+
+    if (!term) return creditedCompletedOrders;
+
+    return creditedCompletedOrders.filter((order) =>
+      String(order.order_code || "").toLowerCase().includes(term)
+    );
+  }, [completedOrdersWithMetrics, orderSearch]);
+
+  const selectedStoreReport = storeDetails
+    ? storesReport.find((store) => store.id === storeDetails.storeId)
+    : null;
 
   async function addFinancialMovement() {
     const amount = Number(movementAmount);
@@ -551,11 +722,18 @@ export default function FinancialReportsPage() {
         <div>
           <h1 className="text-3xl font-bold">التقارير المالية</h1>
           <p className="mt-2 text-neutral-400">
-            الرصيد، المبيعات، الأرباح، المصروفات ورأس المال
+            الرصيد الحالي، المصروفات، مكافآت المناديب، رأس مال المخزون والطلبات المسلمة
           </p>
         </div>
 
         <div className="flex flex-wrap gap-3">
+          <button
+            onClick={() => setShowOrderSearch(true)}
+            className="rounded-xl border border-blue-600 px-5 py-3 font-bold text-blue-200"
+          >
+            بحث عن طلب
+          </button>
+
           <button
             onClick={() => setShowAddMovement(true)}
             className="rounded-xl bg-green-500 px-5 py-3 font-bold text-black"
@@ -579,7 +757,7 @@ export default function FinancialReportsPage() {
         </div>
       </div>
 
-      <div className="mb-6 grid gap-3 md:grid-cols-4 xl:grid-cols-7">
+      <div className="mb-6 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
         <button
           type="button"
           onClick={() => setShowBalanceDetails(true)}
@@ -589,20 +767,8 @@ export default function FinancialReportsPage() {
           <p dir="ltr" className="mt-2 text-2xl font-black text-right">
             {money(allTimeBalance)}
           </p>
-          <p className="mt-3 text-xs text-green-400">
-            اضغط لعرض جميع الإضافات والخصومات
-          </p>
+          <p className="mt-3 text-xs text-green-400">اضغط لعرض التفاصيل</p>
         </button>
-
-        <div className="rounded-2xl border border-blue-800 bg-blue-950/30 p-5">
-          <p className="text-sm text-blue-300">مبيعات الفترة</p>
-          <p dir="ltr" className="mt-2 text-2xl font-black text-right">{money(periodSales)}</p>
-        </div>
-
-        <div className="rounded-2xl border border-purple-800 bg-purple-950/30 p-5">
-          <p className="text-sm text-purple-300">الربح</p>
-          <p dir="ltr" className="mt-2 text-2xl font-black text-right">{money(periodProfit)}</p>
-        </div>
 
         <button
           type="button"
@@ -613,9 +779,7 @@ export default function FinancialReportsPage() {
           <p dir="ltr" className="mt-2 text-2xl font-black text-right">
             {money(periodExpenses)}
           </p>
-          <p className="mt-3 text-xs text-red-400">
-            اضغط لعرض المصروفات والخصومات اليدوية
-          </p>
+          <p className="mt-3 text-xs text-red-400">اضغط لعرض التفاصيل</p>
         </button>
 
         <div className="rounded-2xl border border-orange-800 bg-orange-950/30 p-5">
@@ -625,17 +789,36 @@ export default function FinancialReportsPage() {
           </p>
         </div>
 
-        <div className="rounded-2xl border border-neutral-700 bg-neutral-900 p-5">
-          <p className="text-sm text-neutral-300">الطلبات / القطع</p>
-          <p dir="ltr" className="mt-2 text-xl font-black text-right">
-            {soldOrdersCount} طلب / {soldPiecesCount} قطعة
+        <button
+          type="button"
+          onClick={() => setShowCapitalDetails(true)}
+          className="rounded-2xl border border-yellow-800 bg-yellow-950/30 p-5 text-right transition hover:border-yellow-500"
+        >
+          <p className="text-sm text-yellow-300">رأس مال المخزون</p>
+          <p dir="ltr" className="mt-2 text-2xl font-black text-right">
+            {money(currentCapital)}
           </p>
-        </div>
+          <p className="mt-1 text-sm text-neutral-300">
+            {currentStockPieces} قطعة موجودة
+          </p>
+          <p className="mt-3 text-xs text-yellow-400">اضغط لعرض المتاجر</p>
+        </button>
 
-        <div className="rounded-2xl border border-yellow-800 bg-yellow-950/30 p-5">
-          <p className="text-sm text-yellow-300">رأس المال في المخزون</p>
-          <p dir="ltr" className="mt-2 text-2xl font-black text-right">{money(currentCapital)}</p>
-        </div>
+        <button
+          type="button"
+          onClick={() => setShowOrdersDetails(true)}
+          className="rounded-2xl border border-blue-800 bg-blue-950/30 p-5 text-right transition hover:border-blue-500"
+        >
+          <p className="text-sm text-blue-300">الطلبات المسلمة</p>
+          <p className="mt-2 text-2xl font-black">{totalCompletedOrders} طلب</p>
+          <p className="mt-1 font-bold">{knownDeliveredPieces} قطعة مؤكدة</p>
+          {unresolvedPartialOrders > 0 && (
+            <p className="mt-1 text-xs text-yellow-300">
+              {unresolvedPartialOrders} طلب جزئي لا يمكن تحديد عدد قطعه بدقة من البيانات الحالية
+            </p>
+          )}
+          <p className="mt-3 text-xs text-blue-400">اضغط لعرض الطلبات</p>
+        </button>
       </div>
 
       <div className="mb-6 rounded-2xl border border-neutral-800 bg-neutral-900 p-5">
@@ -698,12 +881,16 @@ export default function FinancialReportsPage() {
             placeholder="DD/MM/YYYY"
           />
         </div>
+
+        <p className="mt-3 text-xs text-neutral-500">
+          الفترة الزمنية تؤثر على المصروفات ومكافآت المناديب وسجل الحركات فقط. الرصيد ورأس المال وبيانات المتاجر لحظية لكل الوقت.
+        </p>
       </div>
 
       {message && <p className="mb-5 text-yellow-400">{message}</p>}
 
       <section className="mb-8">
-        <h2 className="mb-4 text-2xl font-bold">تقرير المتاجر</h2>
+        <h2 className="mb-4 text-2xl font-bold">المتاجر</h2>
 
         <div className="grid gap-4 xl:grid-cols-3">
           {storesReport.map((store) => (
@@ -714,46 +901,64 @@ export default function FinancialReportsPage() {
               <h3 className="mb-5 text-xl font-bold">{store.name}</h3>
 
               <div className="grid grid-cols-2 gap-3 text-sm">
-                <div className="rounded-xl bg-neutral-800 p-3">
-                  <p className="text-neutral-400">الرصيد</p>
-                  <p className="mt-1 font-bold">{money(store.balance)}</p>
-                </div>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setStoreDetails({ storeId: store.id, type: "balance" })
+                  }
+                  className="rounded-xl bg-neutral-800 p-3 text-right transition hover:bg-neutral-700"
+                >
+                  <p className="text-neutral-400">الرصيد الحالي</p>
+                  <p className="mt-1 font-bold text-green-300">
+                    {money(store.balance)}
+                  </p>
+                  <p className="mt-2 text-xs text-neutral-500">عرض التفاصيل</p>
+                </button>
 
                 <div className="rounded-xl bg-neutral-800 p-3">
-                  <p className="text-neutral-400">رأس المال</p>
+                  <p className="text-neutral-400">رأس مال المخزون</p>
                   <p className="mt-1 font-bold">{money(store.capital)}</p>
                 </div>
 
-                <div className="rounded-xl bg-neutral-800 p-3">
-                  <p className="text-neutral-400">المبيعات</p>
-                  <p className="mt-1 font-bold">{money(store.sales)}</p>
-                </div>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setStoreDetails({ storeId: store.id, type: "orders" })
+                  }
+                  className="rounded-xl bg-neutral-800 p-3 text-right transition hover:bg-neutral-700"
+                >
+                  <p className="text-neutral-400">عدد الطلبات المسلمة</p>
+                  <p className="mt-1 font-bold">{store.ordersCount} طلب</p>
+                  <p className="mt-2 text-xs text-neutral-500">عرض الطلبات</p>
+                </button>
 
                 <div className="rounded-xl bg-neutral-800 p-3">
-                  <p className="text-neutral-400">الربح</p>
-                  <p className="mt-1 font-bold">{money(store.profit)}</p>
+                  <p className="text-neutral-400">القطع المسلمة المؤكدة</p>
+                  <p className="mt-1 font-bold">{store.deliveredPieces} قطعة</p>
+                  {store.unresolvedPartials > 0 && (
+                    <p className="mt-1 text-xs text-yellow-300">
+                      + {store.unresolvedPartials} طلب جزئي غير محسوم بالعدد
+                    </p>
+                  )}
                 </div>
 
-                <div className="rounded-xl bg-neutral-800 p-3">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setStoreDetails({ storeId: store.id, type: "expenses" })
+                  }
+                  className="rounded-xl bg-neutral-800 p-3 text-right transition hover:bg-neutral-700"
+                >
                   <p className="text-neutral-400">المصروفات</p>
-                  <p className="mt-1 font-bold">{money(store.expenses)}</p>
-                </div>
-
-                <div className="rounded-xl bg-neutral-800 p-3">
-                  <p className="text-neutral-400">مكافآت المناديب</p>
-                  <p className="mt-1 font-bold">
-                    {money(store.courierRewards)}
+                  <p className="mt-1 font-bold text-red-300">
+                    {money(store.expenses)}
                   </p>
-                </div>
+                  <p className="mt-2 text-xs text-neutral-500">عرض التفاصيل</p>
+                </button>
 
                 <div className="rounded-xl bg-neutral-800 p-3">
-                  <p className="text-neutral-400">عدد الطلبات</p>
-                  <p className="mt-1 font-bold">{store.ordersCount}</p>
-                </div>
-
-                <div className="rounded-xl bg-neutral-800 p-3">
-                  <p className="text-neutral-400">عدد القطع</p>
-                  <p className="mt-1 font-bold">{store.pieces}</p>
+                  <p className="text-neutral-400">قطع المخزون الحالية</p>
+                  <p className="mt-1 font-bold">{store.stockPieces} قطعة</p>
                 </div>
               </div>
             </div>
@@ -841,6 +1046,420 @@ export default function FinancialReportsPage() {
           </table>
         </div>
       </section>
+
+
+      {showCapitalDetails && (
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-black/80 p-4">
+          <div className="mx-auto my-6 w-full max-w-5xl rounded-2xl border border-yellow-900 bg-neutral-950 p-6">
+            <div className="mb-5 flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-2xl font-bold">رأس مال المخزون</h2>
+                <p className="mt-1 text-sm text-neutral-400">
+                  القيمة الحالية للمخزون حسب سعر التكلفة
+                </p>
+              </div>
+              <button
+                onClick={() => setShowCapitalDetails(false)}
+                className="rounded-lg border border-neutral-700 px-4 py-2 font-bold"
+              >
+                إغلاق
+              </button>
+            </div>
+
+            <div className="mb-4 grid gap-3 md:grid-cols-2">
+              <div className="rounded-xl border border-yellow-800 bg-yellow-950/30 p-4">
+                <p className="text-yellow-300">رأس المال الكلي</p>
+                <p className="mt-1 text-3xl font-black">
+                  {money(storesReport.reduce((sum, store) => sum + store.capital, 0))}
+                </p>
+              </div>
+
+              <div className="rounded-xl border border-neutral-700 bg-neutral-900 p-4">
+                <p className="text-neutral-300">إجمالي قطع المخزون</p>
+                <p className="mt-1 text-3xl font-black">
+                  {storesReport.reduce((sum, store) => sum + store.stockPieces, 0)} قطعة
+                </p>
+              </div>
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              {storesReport.map((store) => (
+                <div key={store.id} className="rounded-xl bg-neutral-900 p-4">
+                  <h3 className="mb-3 text-lg font-bold">{store.name}</h3>
+                  <p className="text-neutral-400">رأس المال</p>
+                  <p className="font-black">{money(store.capital)}</p>
+                  <p className="mt-3 text-neutral-400">عدد القطع الموجودة</p>
+                  <p className="font-black">{store.stockPieces} قطعة</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showOrdersDetails && (
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-black/80 p-4">
+          <div className="mx-auto my-6 w-full max-w-7xl rounded-2xl border border-blue-900 bg-neutral-950 p-6">
+            <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="text-2xl font-bold">الطلبات المسلمة</h2>
+                <p className="mt-1 text-sm text-neutral-400">
+                  يعرض فقط الطلبات بحالة تم التسليم أو تسليم جزئي
+                </p>
+              </div>
+              <button
+                onClick={() => setShowOrdersDetails(false)}
+                className="rounded-lg border border-neutral-700 px-4 py-2 font-bold"
+              >
+                إغلاق
+              </button>
+            </div>
+
+            <div className="overflow-x-auto rounded-2xl border border-neutral-800">
+              <table className="w-full min-w-[1500px] text-right">
+                <thead className="bg-neutral-900 text-sm text-neutral-300">
+                  <tr>
+                    <th className="p-4">كود الطلب</th>
+                    <th className="p-4">المتجر</th>
+                    <th className="p-4">الحالة</th>
+                    <th className="p-4">العميل</th>
+                    <th className="p-4">القطع المسلمة</th>
+                    <th className="p-4">دخل إلى الرصيد</th>
+                    <th className="p-4">تاريخ الإنشاء</th>
+                    <th className="p-4">وقت التسليم</th>
+                    <th className="p-4">تفاصيل</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {creditedCompletedOrders.map((order) => (
+                    <tr key={order.id} className="border-t border-neutral-800">
+                      <td dir="ltr" className="p-4 text-right font-black">{order.order_code}</td>
+                      <td className="p-4">{asOne(order.stores)?.name || "—"}</td>
+                      <td className="p-4">{orderStatusText(order.status)}</td>
+                      <td className="p-4">{asOne(order.customers)?.name || "—"}</td>
+                      <td className="p-4 font-bold">
+                        {typeof order.deliveredPieces === "number"
+                          ? `${order.deliveredPieces} قطعة`
+                          : "غير محدد بدقة"}
+                      </td>
+                      <td className="p-4 font-black text-green-300">
+                        {money(order.creditedAmount)}
+                      </td>
+                      <td className="p-4">{formatDateTime(order.created_at)}</td>
+                      <td className="p-4">{formatDateTime(order.deliveryTime)}</td>
+                      <td className="p-4">
+                        <button
+                          onClick={() => setSelectedOrder(order)}
+                          className="rounded-lg bg-blue-600 px-3 py-2 font-bold"
+                        >
+                          فتح
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showOrderSearch && (
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-black/80 p-4">
+          <div className="mx-auto my-6 w-full max-w-5xl rounded-2xl border border-blue-900 bg-neutral-950 p-6">
+            <div className="mb-5 flex items-center justify-between gap-3">
+              <h2 className="text-2xl font-bold">بحث عن طلب مسلم</h2>
+              <button
+                onClick={() => {
+                  setShowOrderSearch(false);
+                  setOrderSearch("");
+                }}
+                className="rounded-lg border border-neutral-700 px-4 py-2 font-bold"
+              >
+                إغلاق
+              </button>
+            </div>
+
+            <input
+              dir="ltr"
+              className="mb-5 w-full rounded-xl bg-neutral-900 p-4 text-left"
+              placeholder="مثال: A423"
+              value={orderSearch}
+              onChange={(event) => setOrderSearch(event.target.value)}
+            />
+
+            <div className="grid gap-3">
+              {searchedOrders.length === 0 ? (
+                <p className="rounded-xl bg-neutral-900 p-5 text-neutral-400">
+                  لا يوجد طلب مسلم بهذا الكود
+                </p>
+              ) : (
+                searchedOrders.slice(0, 30).map((order) => (
+                  <button
+                    key={order.id}
+                    onClick={() => setSelectedOrder(order)}
+                    className="rounded-xl border border-neutral-800 bg-neutral-900 p-4 text-right transition hover:border-blue-600"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span dir="ltr" className="text-xl font-black">{order.order_code}</span>
+                      <span>{orderStatusText(order.status)}</span>
+                    </div>
+                    <p className="mt-2 text-neutral-400">
+                      {asOne(order.stores)?.name || "—"} — {asOne(order.customers)?.name || "—"}
+                    </p>
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {selectedOrder && (
+        <div className="fixed inset-0 z-[60] overflow-y-auto bg-black/85 p-4">
+          <div className="mx-auto my-6 w-full max-w-6xl rounded-2xl border border-neutral-700 bg-neutral-950 p-6">
+            <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 dir="ltr" className="text-right text-3xl font-black">
+                  {selectedOrder.order_code}
+                </h2>
+                <p className="mt-1 text-neutral-400">{orderStatusText(selectedOrder.status)}</p>
+              </div>
+              <button
+                onClick={() => setSelectedOrder(null)}
+                className="rounded-lg border border-neutral-700 px-4 py-2 font-bold"
+              >
+                إغلاق
+              </button>
+            </div>
+
+            <div className="mb-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <div className="rounded-xl bg-neutral-900 p-4">
+                <p className="text-neutral-400">المتجر</p>
+                <p className="mt-1 font-bold">{asOne(selectedOrder.stores)?.name || "—"}</p>
+              </div>
+              <div className="rounded-xl bg-neutral-900 p-4">
+                <p className="text-neutral-400">تاريخ إنشاء الطلب</p>
+                <p className="mt-1 font-bold">{formatDateTime(selectedOrder.created_at)}</p>
+              </div>
+              <div className="rounded-xl bg-neutral-900 p-4">
+                <p className="text-neutral-400">وقت التسليم</p>
+                <p className="mt-1 font-bold">{formatDateTime(selectedOrder.deliveryTime)}</p>
+              </div>
+              <div className="rounded-xl bg-neutral-900 p-4">
+                <p className="text-neutral-400">المندوب</p>
+                <p className="mt-1 font-bold">{asOne(selectedOrder.couriers)?.name || "—"}</p>
+              </div>
+              <div className="rounded-xl bg-neutral-900 p-4">
+                <p className="text-neutral-400">القيمة التي دخلت الرصيد</p>
+                <p className="mt-1 font-black text-green-300">{money(selectedOrder.creditedAmount)}</p>
+              </div>
+              <div className="rounded-xl bg-neutral-900 p-4">
+                <p className="text-neutral-400">الخصومات المرتبطة بالطلب</p>
+                <p className="mt-1 font-black text-red-300">{money(selectedOrder.debitedAmount)}</p>
+              </div>
+              <div className="rounded-xl bg-neutral-900 p-4">
+                <p className="text-neutral-400">القطع المسلمة</p>
+                <p className="mt-1 font-black">
+                  {typeof selectedOrder.deliveredPieces === "number"
+                    ? `${selectedOrder.deliveredPieces} قطعة`
+                    : "غير محدد بدقة"}
+                </p>
+              </div>
+              <div className="rounded-xl bg-neutral-900 p-4">
+                <p className="text-neutral-400">كود المعيار</p>
+                <p dir="ltr" className="mt-1 text-right font-bold">
+                  {selectedOrder.mayar_code || selectedOrder.mayar_shipment_code || "—"}
+                </p>
+              </div>
+            </div>
+
+            <div className="mb-5 rounded-2xl bg-neutral-900 p-5">
+              <h3 className="mb-3 text-xl font-bold">بيانات العميل</h3>
+              <div className="grid gap-2 md:grid-cols-2">
+                <p>الاسم: <b>{asOne(selectedOrder.customers)?.name || "—"}</b></p>
+                <p dir="ltr" className="text-right">الهاتف: <b>{asOne(selectedOrder.customers)?.phone || "—"}</b></p>
+                <p>المدينة: <b>{asOne(asOne(selectedOrder.customers)?.cities)?.name || "—"}</b></p>
+                <p>المنطقة: <b>{asOne(asOne(selectedOrder.customers)?.areas)?.name || "—"}</b></p>
+                <p className="md:col-span-2">العنوان: <b>{asOne(selectedOrder.customers)?.address || "—"}</b></p>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto rounded-2xl border border-neutral-800">
+              <table className="w-full min-w-[900px] text-right">
+                <thead className="bg-neutral-900 text-neutral-300">
+                  <tr>
+                    <th className="p-4">المنتج</th>
+                    <th className="p-4">اللون</th>
+                    <th className="p-4">المقاس</th>
+                    <th className="p-4">الكمية في الطلب</th>
+                    <th className="p-4">سعر الوحدة</th>
+                    <th className="p-4">تكلفة الوحدة</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(selectedOrder.order_items || []).map((item: any) => {
+                    const variant = asOne(item.product_variants);
+                    const product = asOne(variant?.products);
+
+                    return (
+                      <tr key={item.id} className="border-t border-neutral-800">
+                        <td className="p-4">
+                          {product?.name || "—"}
+                          {product?.model ? ` — ${product.model}` : ""}
+                        </td>
+                        <td className="p-4">{variant?.color || "—"}</td>
+                        <td className="p-4">{variant?.size || "—"}</td>
+                        <td className="p-4">{Number(item.quantity || 0)}</td>
+                        <td className="p-4">{money(Number(item.unit_price || 0))}</td>
+                        <td className="p-4">{money(Number(item.unit_cost || 0))}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {selectedOrder.notes && (
+              <div className="mt-5 rounded-xl bg-neutral-900 p-4">
+                <p className="text-neutral-400">ملاحظات الطلب</p>
+                <p className="mt-1 font-bold">{selectedOrder.notes}</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {storeDetails && selectedStoreReport && (
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-black/80 p-4">
+          <div className="mx-auto my-6 w-full max-w-7xl rounded-2xl border border-neutral-700 bg-neutral-950 p-6">
+            <div className="mb-5 flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-2xl font-bold">{selectedStoreReport.name}</h2>
+                <p className="text-neutral-400">
+                  {storeDetails.type === "balance"
+                    ? "تفاصيل الرصيد"
+                    : storeDetails.type === "expenses"
+                      ? "تفاصيل المصروفات"
+                      : "الطلبات المسلمة"}
+                </p>
+              </div>
+              <button
+                onClick={() => setStoreDetails(null)}
+                className="rounded-lg border border-neutral-700 px-4 py-2 font-bold"
+              >
+                إغلاق
+              </button>
+            </div>
+
+            {storeDetails.type === "balance" && (
+              <div className="grid gap-3">
+                <div className="rounded-xl bg-green-950/30 p-4">
+                  <p className="text-green-300">الرصيد الحالي</p>
+                  <p className="text-3xl font-black">{money(selectedStoreReport.balance)}</p>
+                </div>
+                <div className="overflow-x-auto rounded-2xl border border-neutral-800">
+                  <table className="w-full min-w-[1000px] text-right">
+                    <thead className="bg-neutral-900">
+                      <tr>
+                        <th className="p-4">الوقت</th>
+                        <th className="p-4">كود الطلب</th>
+                        <th className="p-4">البيان</th>
+                        <th className="p-4">إضافة</th>
+                        <th className="p-4">خصم</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {transactions
+                        .filter((transaction) => transaction.store_id === selectedStoreReport.id)
+                        .map((transaction) => (
+                          <tr key={transaction.id} className="border-t border-neutral-800">
+                            <td className="p-4">{formatDateTime(transaction.occurred_at)}</td>
+                            <td dir="ltr" className="p-4 text-right">{getOrderCode(transaction)}</td>
+                            <td className="p-4">{displayDescription(transaction)}</td>
+                            <td className="p-4 text-green-300">
+                              {transaction.direction === "credit" ? money(transaction.amount) : "—"}
+                            </td>
+                            <td className="p-4 text-red-300">
+                              {transaction.direction === "debit" ? money(transaction.amount) : "—"}
+                            </td>
+                          </tr>
+                        ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {storeDetails.type === "expenses" && (
+              <div className="grid gap-3">
+                <div className="rounded-xl bg-red-950/30 p-4">
+                  <p className="text-red-300">إجمالي المصروفات</p>
+                  <p className="text-3xl font-black">{money(selectedStoreReport.expenses)}</p>
+                </div>
+                <div className="overflow-x-auto rounded-2xl border border-neutral-800">
+                  <table className="w-full min-w-[800px] text-right">
+                    <thead className="bg-neutral-900">
+                      <tr>
+                        <th className="p-4">الوقت</th>
+                        <th className="p-4">التصنيف</th>
+                        <th className="p-4">البيان</th>
+                        <th className="p-4">القيمة</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {transactions
+                        .filter(
+                          (transaction) =>
+                            transaction.store_id === selectedStoreReport.id &&
+                            transaction.direction === "debit" &&
+                            transaction.is_system_generated === false
+                        )
+                        .map((transaction) => (
+                          <tr key={transaction.id} className="border-t border-neutral-800">
+                            <td className="p-4">{formatDateTime(transaction.occurred_at)}</td>
+                            <td className="p-4">{transaction.category || "—"}</td>
+                            <td className="p-4">{displayDescription(transaction)}</td>
+                            <td className="p-4 text-red-300">{money(transaction.amount)}</td>
+                          </tr>
+                        ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {storeDetails.type === "orders" && (
+              <div className="grid gap-3">
+                {selectedStoreReport.orders.length === 0 ? (
+                  <p className="rounded-xl bg-neutral-900 p-5 text-neutral-400">
+                    لا توجد طلبات مسلمة
+                  </p>
+                ) : (
+                  selectedStoreReport.orders.map((order: any) => (
+                    <button
+                      key={order.id}
+                      onClick={() => setSelectedOrder(order)}
+                      className="rounded-xl border border-neutral-800 bg-neutral-900 p-4 text-right"
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <span dir="ltr" className="text-xl font-black">{order.order_code}</span>
+                        <span>{orderStatusText(order.status)}</span>
+                        <span>
+                          {typeof order.deliveredPieces === "number"
+                            ? `${order.deliveredPieces} قطعة`
+                            : "العدد غير محدد بدقة"}
+                        </span>
+                        <span className="text-green-300">{money(order.creditedAmount)}</span>
+                      </div>
+                    </button>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {showBalanceDetails && (
         <div className="fixed inset-0 z-50 overflow-y-auto bg-black/80 p-4">
