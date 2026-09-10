@@ -450,20 +450,19 @@ export default function NewOrderPage() {
       setMayarOpenable(true);
       setMayarShippingIncluded(false);
       setMayarShippingAmount("");
-      setMayarBankTransferAmount("");
     }
   }, [isMayarShippingSelected]);
 
   useEffect(() => {
     const shouldUseBankTransferField =
-      isMayarShippingSelected &&
+      Boolean(cityId) &&
       !isExchangeOrder &&
       totalAmount === 0;
 
     if (!shouldUseBankTransferField) {
       setMayarBankTransferAmount("");
     }
-  }, [isMayarShippingSelected, isExchangeOrder, totalAmount]);
+  }, [cityId, isExchangeOrder, totalAmount]);
 
   useEffect(() => {
     if (!isPrivateTripoliSelected() && isSelectionOrder) {
@@ -798,7 +797,6 @@ export default function NewOrderPage() {
     }
 
     if (
-      isMayarShippingSelected &&
       !isExchangeOrder &&
       totalAmount === 0
     ) {
@@ -871,6 +869,10 @@ export default function NewOrderPage() {
           mayarShippingAmount:
             isMayarShippingSelected && mayarShippingIncluded
               ? Number(mayarShippingAmount || 0)
+              : 0,
+          bankTransferAmount:
+            !isExchangeOrder && totalAmount === 0
+              ? Number(mayarBankTransferAmount || 0)
               : 0,
           mayarBankTransferAmount:
             isMayarShippingSelected &&
@@ -1615,6 +1617,40 @@ export default function NewOrderPage() {
             </div>
           </section>
         )}
+
+        {isPrivateTripoliSelected() &&
+          !isExchangeOrder &&
+          totalAmount === 0 && (
+            <section className="max-w-5xl rounded-2xl border border-emerald-600 bg-emerald-950/30 p-6">
+              <h2 className="mb-3 text-xl font-bold text-emerald-100">
+                دفع عبر البنك — طرابلس خاصة
+              </h2>
+
+              <label className="mb-2 block font-bold text-emerald-100">
+                القيمة المحولة عبر البنك
+              </label>
+
+              <input
+                className="w-full rounded-xl bg-neutral-900 p-4 text-left"
+                type="text"
+                dir="ltr"
+                inputMode="decimal"
+                placeholder="اكتب القيمة التي تُضاف إلى الرصيد فورًا"
+                value={mayarBankTransferAmount}
+                onChange={(event) => {
+                  const cleanedValue = event.target.value
+                    .replace(/[^0-9.]/g, "")
+                    .replace(/(\..*)\./g, "$1");
+
+                  setMayarBankTransferAmount(cleanedValue);
+                }}
+              />
+
+              <p className="mt-2 text-xs text-emerald-300">
+                تُضاف هذه القيمة إلى الرصيد فور حفظ الطلب. عند تسجيل الطلب لاحقًا كتم التسليم لن تُضاف قيمة البيع مرة ثانية.
+              </p>
+            </section>
+          )}
 
         {isMayarShippingSelected && (
           <section className="max-w-5xl rounded-2xl border border-blue-700 bg-blue-950/30 p-6">

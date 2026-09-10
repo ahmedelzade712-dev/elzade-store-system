@@ -121,6 +121,21 @@ async function updateShippedOrderOrThrow(
   return data;
 }
 
+async function hasPrivateTripoliBankTransfer(orderId: string) {
+  const { data, error } = await supabaseAdmin
+    .from("financial_transactions")
+    .select("id, amount")
+    .eq("order_id", orderId)
+    .eq("source_key", `order:${orderId}:private_tripoli_bank_transfer`)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error("خطأ في فحص التحويل البنكي للطلب: " + error.message);
+  }
+
+  return data || null;
+}
+
 async function recordFinancials(order: any, saleAmount: number, completionType: string) {
   const shippingFee = numberValue(order.shipping_fee);
   const courierReward = await getSetting("private_tripoli_courier_reward", 5);
@@ -179,27 +194,31 @@ async function recordFinancials(order: any, saleAmount: number, completionType: 
     return;
   }
 
-  if (saleAmount <= 0) throw new Error("قيمة البيع يجب أن تكون أكبر من صفر");
+  const bankTransfer = await hasPrivateTripoliBankTransfer(order.id);
 
-  await insertTransactionIfMissing({
-    store_id: order.store_id,
-    order_id: order.id,
-    transaction_type: "sale",
-    direction: "credit",
-    category: "مبيعات",
-    amount: saleAmount,
-    description: `إضافة قيمة طلب طرابلس خاصة ${order.order_code} إلى الرصيد`,
-    source_key: `order:${order.id}:private_tripoli_sale`,
-    is_system_generated: true,
-    occurred_at: occurredAt,
-    metadata: {
-      order_code: order.order_code,
-      shipping_company: "private_tripoli",
-      completion_type: completionType,
-      final_sale_amount: saleAmount,
-      shipping_fee: shippingFee,
-    },
-  });
+  if (!bankTransfer) {
+    if (saleAmount <= 0) throw new Error("قيمة البيع يجب أن تكون أكبر من صفر");
+
+    await insertTransactionIfMissing({
+      store_id: order.store_id,
+      order_id: order.id,
+      transaction_type: "sale",
+      direction: "credit",
+      category: "مبيعات",
+      amount: saleAmount,
+      description: `إضافة قيمة طلب طرابلس خاصة ${order.order_code} إلى الرصيد`,
+      source_key: `order:${order.id}:private_tripoli_sale`,
+      is_system_generated: true,
+      occurred_at: occurredAt,
+      metadata: {
+        order_code: order.order_code,
+        shipping_company: "private_tripoli",
+        completion_type: completionType,
+        final_sale_amount: saleAmount,
+        shipping_fee: shippingFee,
+      },
+    });
+  }
 
   const storePaysShipping = shippingFee === 0;
   if (storePaysShipping) {

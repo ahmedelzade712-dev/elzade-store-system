@@ -129,10 +129,13 @@ export async function POST(request: Request) {
     const mayarShippingAmount = mayarShippingIncluded
       ? Math.max(0, asNumber(body.mayarShippingAmount))
       : 0;
-    const mayarBankTransferAmount = Math.max(
+    const bankTransferAmount = Math.max(
       0,
-      asNumber(body.mayarBankTransferAmount)
+      asNumber(body.bankTransferAmount ?? body.mayarBankTransferAmount)
     );
+    const mayarBankTransferAmount = isNaN(bankTransferAmount)
+      ? 0
+      : bankTransferAmount;
     const exchangeOriginalOrderId = asText(body.exchangeOriginalOrderId) || null;
     const exchangeReturnSelections =
       body.exchangeReturnSelections &&
@@ -474,20 +477,24 @@ export async function POST(request: Request) {
             0
           );
 
-    const isMayarBankTransferOrder =
-      isMayar &&
+    const isBankTransferOrder =
       mayarParcelType !== "exchange" &&
       totalAmount === 0 &&
-      mayarBankTransferAmount > 0;
+      bankTransferAmount > 0;
+
+    const isMayarBankTransferOrder = isMayar && isBankTransferOrder;
+    const isPrivateTripoliBankTransferOrder =
+      isPrivateTripoli && isBankTransferOrder;
 
     if (
-      isMayar &&
       mayarParcelType !== "exchange" &&
       totalAmount === 0 &&
-      mayarBankTransferAmount <= 0
+      bankTransferAmount <= 0
     ) {
       throw new Error(
-        "يجب إدخال القيمة المحولة عبر البنك عندما تكون قيمة طلب المعيار صفر"
+        isPrivateTripoli
+          ? "يجب إدخال القيمة المحولة عبر البنك عندما تكون قيمة طلب طرابلس خاصة صفر"
+          : "يجب إدخال القيمة المحولة عبر البنك عندما تكون قيمة طلب المعيار صفر"
       );
     }
 
@@ -720,12 +727,17 @@ export async function POST(request: Request) {
     }
 
     /*
-      حالة خاصة بطلبات المعيار فقط:
-      عندما تكون قيمة الطلب صفرًا وتم إدخال مبلغ محول عبر البنك،
-      تُضاف القيمة إلى الرصيد فورًا ولا تنتظر حالة "تم التسليم".
-      هذه القيمة لا تؤثر مطلقًا على البيانات المرسلة إلى شركة المعيار.
+      عندما تكون قيمة المنتجات صفرًا وتم إدخال مبلغ محول عبر البنك،
+      تُضاف القيمة إلى الرصيد فورًا سواء كان الطلب معيار أو طرابلس خاصة.
+      عند التسليم لاحقًا لا تُضاف قيمة البيع مرة ثانية.
     */
-    if (isMayarBankTransferOrder) {
+    if (isBankTransferOrder) {
+      const sourceKey = isPrivateTripoli
+        ? `order:${order.id}:private_tripoli_bank_transfer`
+        : `order:${order.id}:mayar_bank_transfer`;
+
+      const channelText = isPrivateTripoli ? "طرابلس خاصة" : "المعيار";
+
       const { data: bankTransferTransaction, error: bankTransferError } =
         await supabaseAdmin
           .from("financial_transactions")
@@ -735,19 +747,21 @@ export async function POST(request: Request) {
             transaction_type: "sale",
             direction: "credit",
             category: "مبيعات",
-            amount: mayarBankTransferAmount,
+            amount: bankTransferAmount,
             description:
-              `تم تحويل قيمة طلب المعيار ${order.order_code} عبر البنك`,
-            source_key:
-              `order:${order.id}:mayar_bank_transfer`,
+              `تم تحويل قيمة طلب ${channelText} ${order.order_code} عبر البنك`,
+            source_key: sourceKey,
             is_system_generated: true,
             occurred_at: new Date().toISOString(),
             metadata: {
               order_code: order.order_code,
               payment_type: "bank_transfer",
+              shipping_company: isPrivateTripoli
+                ? "private_tripoli"
+                : "mayar",
               credited_immediately: true,
-              mayar_collection_amount: 0,
-              bank_transfer_amount: mayarBankTransferAmount,
+              mayar_collection_amount: isMayar ? 0 : null,
+              bank_transfer_amount: bankTransferAmount,
             },
           })
           .select("id")
@@ -781,9 +795,13 @@ export async function POST(request: Request) {
       mayar_shipping_included: isMayar ? mayarShippingIncluded : false,
       mayar_shipping_amount:
         isMayar && mayarShippingIncluded ? mayarShippingAmount : 0,
+      bank_transfer_recorded: isBankTransferOrder,
+      bank_transfer_amount: isBankTransferOrder ? bankTransferAmount : 0,
+      private_tripoli_bank_transfer_recorded:
+        isPrivateTripoliBankTransferOrder,
       mayar_bank_transfer_recorded: isMayarBankTransferOrder,
       mayar_bank_transfer_amount:
-        isMayarBankTransferOrder ? mayarBankTransferAmount : 0,
+        isMayarBankTransferOrder ? bankTransferAmount : 0,
       deducted_items_count: normalizedCart.reduce(
         (sum: number, item: NormalizedCartItem) => sum + item.quantity,
         0
