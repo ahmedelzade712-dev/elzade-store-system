@@ -26,6 +26,8 @@ type PrivateTripoliOrder = {
   total_cost: number;
   shipping_fee: number;
   notes: string;
+  created_at: string | null;
+  courier_name: string;
   is_selection_order: boolean;
   is_exchange_order: boolean;
   customer: {
@@ -40,6 +42,19 @@ type PrivateTripoliOrder = {
 };
 
 type ActionType = "" | "delivered" | "partial" | "returned" | "selection";
+
+function formatOrderDate(value: string | null) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+
+  const dayName = new Intl.DateTimeFormat("ar", { weekday: "long" }).format(date);
+  const dd = String(date.getDate()).padStart(2, "0");
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const yyyy = String(date.getFullYear());
+
+  return `${dayName} ${dd}/${mm}/${yyyy}`;
+}
 
 export default function PrivateTripoliPage() {
   const [orders, setOrders] = useState<PrivateTripoliOrder[]>([]);
@@ -214,11 +229,15 @@ export default function PrivateTripoliPage() {
       }
 
       setMessage(result.message || "تم تحديث الطلب بنجاح");
+
+      setOrders((prev) => prev.filter((item) => item.id !== order.id));
+
       setActions((prev) => {
         const next = { ...prev };
         delete next[order.id];
         return next;
       });
+
       await loadData();
     } catch (error: any) {
       setMessage("فشل الاتصال بالخادم: " + (error?.message || "خطأ غير معروف"));
@@ -253,6 +272,9 @@ export default function PrivateTripoliPage() {
         </div>
 
         <div className="flex flex-wrap gap-3">
+          <a href="/" className="rounded-xl bg-green-500 px-5 py-3 font-bold text-black">
+            لوحة التحكم
+          </a>
           <button
             onClick={loadData}
             className="rounded-xl border border-neutral-700 px-5 py-3 font-bold"
@@ -292,6 +314,10 @@ export default function PrivateTripoliPage() {
           {filteredOrders.map((order) => {
             const action = actions[order.id] || (order.is_selection_order ? "selection" : "");
             const busy = busyOrderId === order.id;
+            const totalOrderQuantity = order.items.reduce(
+              (sum, item) => sum + Number(item.quantity || 0),
+              0
+            );
 
             return (
               <section key={order.id} className="rounded-2xl border border-neutral-800 bg-neutral-900 p-5">
@@ -321,6 +347,12 @@ export default function PrivateTripoliPage() {
                       {order.customer.area} / {order.customer.address}
                     </p>
                     <p className="text-neutral-500">المتجر: {order.store_name}</p>
+                    <p className="mt-1 text-neutral-400">
+                      التاريخ: {formatOrderDate(order.created_at)}
+                    </p>
+                    <p className="text-neutral-400">
+                      المندوب: <b>{order.courier_name || "-"}</b>
+                    </p>
                   </div>
 
                   <div className="text-left">
@@ -432,7 +464,9 @@ export default function PrivateTripoliPage() {
                       ) : (
                         <>
                           <option value="delivered">تم التسليم</option>
-                          <option value="partial">تسليم جزئي</option>
+                          {totalOrderQuantity > 1 && (
+                            <option value="partial">تسليم جزئي</option>
+                          )}
                           <option value="returned">مرتجع / لم يتم التسليم</option>
                         </>
                       )}

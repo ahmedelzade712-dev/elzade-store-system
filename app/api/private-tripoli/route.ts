@@ -94,6 +94,33 @@ async function markPrivateTripoliReturn(order: any, reason: string) {
   if (error) throw new Error(error.message);
 }
 
+
+async function updateShippedOrderOrThrow(
+  orderId: string,
+  payload: Record<string, any>,
+  errorMessage: string
+) {
+  const { data, error } = await supabaseAdmin
+    .from("orders")
+    .update(payload)
+    .eq("id", orderId)
+    .eq("status", "shipped")
+    .select("id, status")
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`${errorMessage}: ${error.message}`);
+  }
+
+  if (!data) {
+    throw new Error(
+      `${errorMessage}: لم يتم تغيير حالة الطلب. أعد تحميل الصفحة وتحقق من الحالة الحالية.`
+    );
+  }
+
+  return data;
+}
+
 async function recordFinancials(order: any, saleAmount: number, completionType: string) {
   const shippingFee = numberValue(order.shipping_fee);
   const courierReward = await getSetting("private_tripoli_courier_reward", 5);
@@ -281,6 +308,7 @@ function normalizeOrder(order: any) {
   const city = asOne(customer?.cities);
   const area = asOne(customer?.areas);
   const store = asOne(order.stores);
+  const courier = asOne(order.couriers);
 
   return {
     id: order.id,
@@ -292,6 +320,8 @@ function normalizeOrder(order: any) {
     total_cost: numberValue(order.total_cost),
     shipping_fee: numberValue(order.shipping_fee),
     notes: order.notes || "",
+    created_at: order.created_at || null,
+    courier_name: courier?.name || "-",
     is_selection_order: Boolean(order.is_trial_order),
     is_exchange_order:
       String(order.mayar_parcel_type || "").trim() === "exchange" ||
@@ -345,8 +375,10 @@ export async function GET(request: Request) {
         trial_status,
         mayar_parcel_type,
         exchange_original_order_id,
+        courier_id,
         created_at,
         stores(id, name),
+        couriers(id, name),
         customers(id, name, phone, phone2, address, cities(name), areas(name)),
         order_items(
           id,
@@ -432,17 +464,15 @@ export async function POST(request: Request) {
 
       await markPrivateTripoliReturn(order, "مرتجع طرابلس خاصة - تم إرجاع المخزون");
 
-      const { error: updateError } = await supabaseAdmin
-        .from("orders")
-        .update({
+      await updateShippedOrderOrThrow(
+        order.id,
+        {
           status: "returned",
           trial_status: isSelectionOrder ? "closed" : order.trial_status,
           trial_closed_at: isSelectionOrder ? new Date().toISOString() : null,
-        })
-        .eq("id", order.id)
-        .eq("status", "shipped");
-
-      if (updateError) throw new Error("فشل تحديث حالة الطلب: " + updateError.message);
+        },
+        "فشل تحديث حالة الطلب"
+      );
 
       return NextResponse.json({
         ok: true,
@@ -454,18 +484,25 @@ export async function POST(request: Request) {
       const saleAmount = isExchangeOrder ? 0 : numberValue(order.total_amount);
       await recordFinancials(order, saleAmount, "delivered");
 
-      const { error: updateError } = await supabaseAdmin
-        .from("orders")
-        .update({ status: "delivered" })
-        .eq("id", order.id)
-        .eq("status", "shipped");
-
-      if (updateError) throw new Error("فشل تحديث حالة الطلب: " + updateError.message);
+      await updateShippedOrderOrThrow(
+        order.id,
+        { status: "delivered" },
+        "فشل تحديث حالة الطلب"
+      );
 
       return NextResponse.json({ ok: true, message: `تم تسجيل الطلب ${order.order_code} كتم التسليم.` });
     }
 
     if (action === "partial") {
+      const totalOrderQuantity = items.reduce(
+        (sum: number, item: any) => sum + numberValue(item.quantity),
+        0
+      );
+
+      if (totalOrderQuantity <= 1) {
+        throw new Error("التسليم الجزئي متاح فقط للطلبات التي تحتوي على أكثر من قطعة");
+      }
+
       const receivedAmount = numberValue(body?.received_amount);
       const returnedItems = Array.isArray(body?.returned_items) ? body.returned_items : [];
 
@@ -508,17 +545,15 @@ export async function POST(request: Request) {
 
       await recordFinancials(order, receivedAmount, "partial_delivered");
 
-      const { error: updateError } = await supabaseAdmin
-        .from("orders")
-        .update({
+      await updateShippedOrderOrThrow(
+        order.id,
+        {
           status: "partial_delivered",
           total_amount: receivedAmount,
           total_cost: keptCost,
-        })
-        .eq("id", order.id)
-        .eq("status", "shipped");
-
-      if (updateError) throw new Error("فشل تحديث حالة الطلب: " + updateError.message);
+        },
+        "فشل تحديث حالة الطلب"
+      );
 
       return NextResponse.json({
         ok: true,
@@ -575,19 +610,17 @@ export async function POST(request: Request) {
 
     await recordFinancials(order, saleAmount, "selection_delivered");
 
-    const { error: updateError } = await supabaseAdmin
-      .from("orders")
-      .update({
+    await updateShippedOrderOrThrow(
+      order.id,
+      {
         status: "delivered",
         total_amount: saleAmount,
         total_cost: keptCost,
         trial_status: "closed",
         trial_closed_at: new Date().toISOString(),
-      })
-      .eq("id", order.id)
-      .eq("status", "shipped");
-
-    if (updateError) throw new Error("فشل تحديث حالة الطلب: " + updateError.message);
+      },
+      "فشل تحديث حالة الطلب"
+    );
 
     return NextResponse.json({
       ok: true,
