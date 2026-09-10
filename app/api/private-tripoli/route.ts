@@ -43,50 +43,55 @@ async function restoreStockOnce(
   }
 
   const reason = `${reasonSuffix} - ${order.order_code} - ${item.id}`;
-  const { data: existingMovement, error: movementReadError } = await supabaseAdmin
-    .from("inventory_movements")
-    .select("id")
-    .eq("variant_id", item.variant_id)
-    .eq("movement_type", movementType)
-    .eq("reason", reason)
-    .maybeSingle();
+  const returnKey = `${movementType}:${order.id}:${item.id}`;
 
-  if (movementReadError) throw new Error(movementReadError.message);
-  if (existingMovement) return;
-
-  const { data: variant, error: variantError } = await supabaseAdmin
-    .from("product_variants")
-    .select("stock_quantity")
-    .eq("id", item.variant_id)
-    .single();
-
-  if (variantError || !variant) {
-    throw new Error("خطأ في قراءة المخزون: " + (variantError?.message || "المنتج غير موجود"));
-  }
-
-  const beforeQty = numberValue(variant.stock_quantity);
-  const afterQty = beforeQty + qty;
-
-  const { error: stockError } = await supabaseAdmin
-    .from("product_variants")
-    .update({ stock_quantity: afterQty })
-    .eq("id", item.variant_id)
-    .eq("stock_quantity", beforeQty);
-
-  if (stockError) throw new Error("خطأ في إعادة المخزون: " + stockError.message);
-
-  const { error: movementError } = await supabaseAdmin.from("inventory_movements").insert({
-    variant_id: item.variant_id,
-    movement_type: movementType,
-    quantity_change: qty,
-    quantity_before: beforeQty,
-    quantity_after: afterQty,
-    reason,
+  const { error } = await supabaseAdmin.rpc("restore_inventory_once", {
+    p_return_key: returnKey,
+    p_variant_id: item.variant_id,
+    p_quantity: qty,
+    p_movement_type: movementType,
+    p_reason: reason,
   });
 
-  if (movementError) {
-    throw new Error("تمت إعادة المخزون لكن فشل تسجيل حركة المخزون: " + movementError.message);
+  if (error) {
+    throw new Error("خطأ في إعادة المخزون بصورة آمنة: " + error.message);
   }
+}
+
+async function markPrivateTripoliReturn(order: any, reason: string) {
+  const { data: existing, error: readError } = await supabaseAdmin
+    .from("order_returns")
+    .select("id")
+    .eq("order_id", order.id)
+    .maybeSingle();
+
+  if (readError) throw new Error(readError.message);
+
+  if (existing) {
+    const { error } = await supabaseAdmin
+      .from("order_returns")
+      .update({
+        return_reason: reason,
+        inventory_restored: true,
+        financial_reversed: false,
+      })
+      .eq("id", existing.id);
+
+    if (error) throw new Error(error.message);
+    return;
+  }
+
+  const { error } = await supabaseAdmin.from("order_returns").insert({
+    order_id: order.id,
+    store_id: order.store_id,
+    order_code: order.order_code,
+    mayar_code: null,
+    return_reason: reason,
+    inventory_restored: true,
+    financial_reversed: false,
+  });
+
+  if (error) throw new Error(error.message);
 }
 
 async function recordFinancials(order: any, saleAmount: number, completionType: string) {
@@ -425,6 +430,8 @@ export async function POST(request: Request) {
         await restoreStockOnce(order, item, item.quantity, "private_tripoli_return", "مرتجع طرابلس خاصة");
       }
 
+      await markPrivateTripoliReturn(order, "مرتجع طرابلس خاصة - تم إرجاع المخزون");
+
       const { error: updateError } = await supabaseAdmin
         .from("orders")
         .update({
@@ -497,6 +504,8 @@ export async function POST(request: Request) {
         }
       }
 
+      await markPrivateTripoliReturn(order, "تسليم جزئي طرابلس خاصة - القطع الراجعة أُعيدت للمخزون");
+
       await recordFinancials(order, receivedAmount, "partial_delivered");
 
       const { error: updateError } = await supabaseAdmin
@@ -542,9 +551,12 @@ export async function POST(request: Request) {
 
     if (keptQtyTotal <= 0) throw new Error("حدد قطعة واحدة على الأقل أخذها الزبون");
 
+    let selectionReturnedQty = 0;
+
     for (const item of items) {
       const keptQty = keptMap.get(String(item.id)) || 0;
       const returnQty = item.quantity - keptQty;
+      selectionReturnedQty += Math.max(0, returnQty);
 
       const { error: keptFlagError } = await supabaseAdmin
         .from("order_items")
@@ -555,6 +567,10 @@ export async function POST(request: Request) {
       if (returnQty > 0) {
         await restoreStockOnce(order, item, returnQty, "private_tripoli_selection_return", "إرجاع طلب اختيار طرابلس خاصة");
       }
+    }
+
+    if (selectionReturnedQty > 0) {
+      await markPrivateTripoliReturn(order, "طلب اختيار طرابلس خاصة - القطع غير المختارة أُعيدت للمخزون");
     }
 
     await recordFinancials(order, saleAmount, "selection_delivered");

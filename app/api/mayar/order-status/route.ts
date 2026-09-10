@@ -144,6 +144,36 @@ async function insertFinancialTransactionIfMissing(payload: any) {
   }
 }
 
+
+async function persistMayarDeliveryResult(shipment: any) {
+  const orderCode = String(shipment?.refNumber || "").trim();
+  if (!orderCode) return;
+
+  const mayarPrice = Number(shipment?.price || 0);
+  const returnedValue = Number(shipment?.returnedValue || 0);
+  const customerDue = Number(shipment?.customerDue || 0);
+
+  const isPartialDelivery =
+    returnedValue > 0 ||
+    (mayarPrice > 0 && customerDue >= 0 && customerDue < mayarPrice);
+
+  const { error } = await supabaseAdmin
+    .from("orders")
+    .update({
+      mayar_delivery_result: isPartialDelivery ? "partial" : "full",
+      mayar_price: mayarPrice,
+      mayar_returned_value: returnedValue,
+      mayar_customer_due: customerDue,
+    })
+    .eq("order_code", orderCode);
+
+  if (error) {
+    throw new Error(
+      `فشل حفظ نتيجة تسليم المعيار للطلب ${orderCode}: ${error.message}`
+    );
+  }
+}
+
 async function recordDeliveredMayarOrder(shipment: any) {
   const orderCode = String(shipment.refNumber || "").trim();
 
@@ -425,6 +455,8 @@ export async function GET(request: Request) {
       }
 
       if (normalized.key === "delivered") {
+        // نحفظ نتيجة التسليم (كامل/جزئي) بصورة مستقلة عن أي منطق مالي.
+        await persistMayarDeliveryResult(shipment);
         await recordDeliveredMayarOrder(shipment);
       }
     }
