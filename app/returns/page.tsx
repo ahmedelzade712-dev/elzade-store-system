@@ -43,6 +43,10 @@ export default function ReturnsPage() {
   const [alreadyReturned, setAlreadyReturned] = useState(false);
   const [isExchangeReturn, setIsExchangeReturn] = useState(false);
   const [exchangeOrder, setExchangeOrder] = useState<any>(null);
+  const [returnAllowed, setReturnAllowed] = useState(false);
+  const [allowedReturnMode, setAllowedReturnMode] = useState<ReturnMode | null>(null);
+  const [blockReason, setBlockReason] = useState("");
+  const [returnKind, setReturnKind] = useState("");
   const [returnMode, setReturnMode] = useState<ReturnMode>("full");
   const [returnedQuantities, setReturnedQuantities] =
     useState<ReturnedQuantities>({});
@@ -103,6 +107,10 @@ export default function ReturnsPage() {
     setAlreadyReturned(false);
     setIsExchangeReturn(false);
     setExchangeOrder(null);
+    setReturnAllowed(false);
+    setAllowedReturnMode(null);
+    setBlockReason("");
+    setReturnKind("");
     setReturnMode("full");
     setReturnedQuantities({});
 
@@ -122,6 +130,21 @@ export default function ReturnsPage() {
       setAlreadyReturned(Boolean(result.already_returned));
       setIsExchangeReturn(Boolean(result.is_exchange_return));
       setExchangeOrder(result.exchange_order || null);
+      setReturnAllowed(Boolean(result.return_allowed));
+      setAllowedReturnMode(
+        result.allowed_return_mode === "partial"
+          ? "partial"
+          : result.allowed_return_mode === "full"
+            ? "full"
+            : null
+      );
+      setReturnKind(String(result.return_kind || ""));
+      setBlockReason(String(result.block_reason || ""));
+      setReturnMode(result.allowed_return_mode === "partial" ? "partial" : "full");
+
+      if (!result.return_allowed && result.block_reason) {
+        setMessage(String(result.block_reason));
+      }
     } catch (error: any) {
       setMessage(error.message || "حدث خطأ أثناء البحث");
     } finally {
@@ -152,9 +175,9 @@ export default function ReturnsPage() {
   }
 
   async function executeReturn() {
-    if (!order || executing || alreadyReturned) return;
+    if (!order || executing || alreadyReturned || !returnAllowed || !allowedReturnMode) return;
 
-    if (!isExchangeReturn && returnMode === "partial" && selectedQuantity === 0) {
+    if (!isExchangeReturn && allowedReturnMode === "partial" && selectedQuantity === 0) {
       setMessage("حدد قطعة واحدة على الأقل للاسترجاع الجزئي");
       return;
     }
@@ -162,7 +185,7 @@ export default function ReturnsPage() {
     const confirmed = window.confirm(
       isExchangeReturn
         ? `الطلب ${order.order_code} هو القطعة القديمة في استبدال ${exchangeOrder?.order_code || ""}. سيتم فقط إعادة القطعة إلى المخزون دون أي تعديل مالي. هل وصلت القطعة فعليًا؟`
-        : returnMode === "partial"
+        : allowedReturnMode === "partial"
           ? `هل أنت متأكد من إعادة ${selectedQuantity} قطعة من الطلب ${order.order_code} إلى المخزون فقط؟ لن يتم تعديل الرصيد أو التقارير المالية.`
           : `هل أنت متأكد من إعادة جميع منتجات الطلب ${order.order_code} إلى المخزون فقط؟ لن يتم تعديل الرصيد أو التقارير المالية.`
     );
@@ -179,9 +202,9 @@ export default function ReturnsPage() {
         body: JSON.stringify({
           code: order.order_code,
           reason: reason.trim(),
-          return_mode: isExchangeReturn ? "full" : returnMode,
+          return_mode: isExchangeReturn ? "full" : allowedReturnMode,
           returned_items:
-            !isExchangeReturn && returnMode === "partial"
+            !isExchangeReturn && allowedReturnMode === "partial"
               ? selectedReturnItems.map((item: any) => ({
                   order_item_id: item.order_item_id,
                   quantity: item.quantity,
@@ -201,7 +224,7 @@ export default function ReturnsPage() {
         result.message ||
           (result.is_exchange_return
             ? "تمت إعادة القطعة المستبدلة إلى المخزون دون تعديل الرصيد"
-            : returnMode === "partial"
+            : allowedReturnMode === "partial"
               ? "تم الاسترجاع الجزئي وإعادة القطع المحددة إلى المخزون بنجاح"
               : "تم الاسترجاع الكامل وإعادة المنتجات إلى المخزون بنجاح")
       );
@@ -219,6 +242,10 @@ export default function ReturnsPage() {
     setAlreadyReturned(false);
     setIsExchangeReturn(false);
     setExchangeOrder(null);
+    setReturnAllowed(false);
+    setAllowedReturnMode(null);
+    setBlockReason("");
+    setReturnKind("");
     setReturnMode("full");
     setReturnedQuantities({});
     setMessage("");
@@ -369,7 +396,32 @@ export default function ReturnsPage() {
             </div>
           </section>
 
-          {!isExchangeReturn && !alreadyReturned && (
+          {!isExchangeReturn && returnAllowed && (
+            <section className="rounded-2xl border border-neutral-800 bg-neutral-900 p-6">
+              <h2 className="mb-3 text-2xl font-bold">نوع الرجوع المعتمد</h2>
+              <div className="rounded-xl border border-green-800 bg-green-950/30 p-4">
+                <p className="font-bold text-green-200">
+                  {allowedReturnMode === "partial"
+                    ? "تسليم جزئي من المعيار — حدد فقط القطع التي رجعت فعليًا"
+                    : "مرتجع كامل من المعيار — ستعود جميع قطع الطلب إلى المخزون"}
+                </p>
+                <p className="mt-2 text-sm text-neutral-300">
+                  لا توجد أي حركة مالية في هذه الصفحة.
+                </p>
+              </div>
+            </section>
+          )}
+
+          {!returnAllowed && order && (
+            <section className="rounded-2xl border border-red-900 bg-red-950/30 p-6">
+              <h2 className="text-xl font-bold text-red-200">الاسترجاع غير مسموح</h2>
+              <p className="mt-2 text-red-100">
+                {blockReason || "هذا الطلب غير مؤهل للاسترجاع من هذه الصفحة."}
+              </p>
+            </section>
+          )}
+
+          {!isExchangeReturn && returnAllowed && (
             <section className="rounded-2xl border border-neutral-800 bg-neutral-900 p-6">
               <h2 className="mb-4 text-2xl font-bold">نوع الاسترجاع</h2>
               <div className="grid gap-3 md:grid-cols-2">
@@ -377,7 +429,7 @@ export default function ReturnsPage() {
                   type="button"
                   onClick={() => setReturnMode("full")}
                   className={`rounded-xl border p-5 text-right ${
-                    returnMode === "full"
+                    allowedReturnMode === "full"
                       ? "border-red-500 bg-red-950/40"
                       : "border-neutral-700 bg-neutral-800"
                   }`}
@@ -392,7 +444,7 @@ export default function ReturnsPage() {
                   type="button"
                   onClick={() => setReturnMode("partial")}
                   className={`rounded-xl border p-5 text-right ${
-                    returnMode === "partial"
+                    allowedReturnMode === "partial"
                       ? "border-yellow-500 bg-yellow-950/40"
                       : "border-neutral-700 bg-neutral-800"
                   }`}
@@ -410,7 +462,7 @@ export default function ReturnsPage() {
             <h2 className="mb-4 text-2xl font-bold">
               {isExchangeReturn
                 ? "القطع القديمة التي ستعود للمخزون"
-                : returnMode === "partial"
+                : allowedReturnMode === "partial"
                   ? "حدد المنتجات والكميات الراجعة"
                   : "المنتجات التي ستعود للمخزون"}
             </h2>
@@ -455,7 +507,7 @@ export default function ReturnsPage() {
                           <p className="text-sm text-neutral-400">
                             {item.model} / {item.color} / {item.size}
                           </p>
-                          {!isExchangeReturn && returnMode === "partial" && (
+                          {!isExchangeReturn && allowedReturnMode === "partial" && (
                             <p className="mt-2 text-sm text-neutral-300">
                               الكمية المباعة: <strong dir="ltr">{item.quantity}</strong>
                             </p>
@@ -463,7 +515,7 @@ export default function ReturnsPage() {
                         </div>
                       </div>
 
-                      {!isExchangeReturn && returnMode === "partial" ? (
+                      {!isExchangeReturn && allowedReturnMode === "partial" ? (
                         <div className="flex items-center gap-3">
                           <button
                             type="button"
@@ -506,7 +558,7 @@ export default function ReturnsPage() {
               )}
             </div>
 
-            {!isExchangeReturn && returnMode === "partial" && (
+            {!isExchangeReturn && allowedReturnMode === "partial" && (
               <div className="mt-5 rounded-xl border border-neutral-700 bg-neutral-950 p-4">
                 <p className="text-sm text-neutral-400">عدد القطع المختارة للعودة إلى المخزون</p>
                 <p dir="ltr" className="mt-1 text-3xl font-black text-right">
@@ -532,6 +584,10 @@ export default function ReturnsPage() {
               <div className="mt-5 rounded-xl bg-green-950/40 p-4 font-bold text-green-300">
                 تم استرجاع هذا الطلب سابقًا
               </div>
+            ) : !returnAllowed ? (
+              <div className="mt-5 rounded-xl bg-red-950/40 p-4 font-bold text-red-300">
+                {blockReason || "الاسترجاع غير مسموح لهذا الطلب"}
+              </div>
             ) : (
               <button
                 type="button"
@@ -539,7 +595,7 @@ export default function ReturnsPage() {
                 disabled={
                   executing ||
                   (!isExchangeReturn &&
-                    returnMode === "partial" &&
+                    allowedReturnMode === "partial" &&
                     selectedQuantity === 0)
                 }
                 className="mt-5 w-full rounded-xl bg-red-600 p-4 text-lg font-bold disabled:cursor-not-allowed disabled:opacity-50"
@@ -548,7 +604,7 @@ export default function ReturnsPage() {
                   ? "جاري تنفيذ العملية..."
                   : isExchangeReturn
                     ? "تأكيد وصول القطعة وإعادتها للمخزون فقط"
-                    : returnMode === "partial"
+                    : allowedReturnMode === "partial"
                       ? "تنفيذ الاسترجاع الجزئي"
                       : "تنفيذ الاسترجاع الكامل"}
               </button>
