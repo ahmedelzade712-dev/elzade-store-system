@@ -35,6 +35,7 @@ export default function InventoryPage() {
   const [typeFilter, setTypeFilter] = useState("");
 
   const [selectedItem, setSelectedItem] = useState<any>(null);
+  const [stockOperation, setStockOperation] = useState<"add" | "subtract">("add");
   const [addQty, setAddQty] = useState("");
 
   useEffect(() => {
@@ -157,35 +158,94 @@ export default function InventoryPage() {
 
     const qty = Number(addQty);
 
-    if (!qty || qty <= 0) {
-      setMessage("اكتب كمية صحيحة");
+    if (!Number.isInteger(qty) || qty <= 0) {
+      setMessage("اكتب كمية صحيحة أكبر من صفر");
       return;
     }
 
-    const beforeQty = Number(selectedItem.stock_quantity || 0);
-    const afterQty = beforeQty + qty;
+    const { data: currentVariant, error: currentError } = await supabase
+      .from("product_variants")
+      .select("id, stock_quantity")
+      .eq("id", selectedItem.id)
+      .single();
 
-    const { error: updateError } = await supabase
+    if (currentError || !currentVariant) {
+      setMessage(
+        "تعذر قراءة الكمية الحالية: " +
+          (currentError?.message || "المقاس غير موجود")
+      );
+      return;
+    }
+
+    const beforeQty = Number(currentVariant.stock_quantity || 0);
+
+    if (stockOperation === "subtract" && qty > beforeQty) {
+      setMessage(`لا يمكن خصم ${qty} لأن الكمية الحالية ${beforeQty} فقط`);
+      return;
+    }
+
+    const signedChange = stockOperation === "add" ? qty : -qty;
+    const afterQty = beforeQty + signedChange;
+
+    const { data: updatedVariant, error: updateError } = await supabase
       .from("product_variants")
       .update({ stock_quantity: afterQty })
-      .eq("id", selectedItem.id);
+      .eq("id", selectedItem.id)
+      .select("id, stock_quantity")
+      .single();
 
-    if (updateError) {
-      setMessage("خطأ في تحديث المخزون: " + updateError.message);
+    if (updateError || !updatedVariant) {
+      setMessage(
+        "خطأ في تحديث المخزون: " +
+          (updateError?.message || "لم يتم تحديث أي صف")
+      );
       return;
     }
 
-    await supabase.from("inventory_movements").insert({
-      variant_id: selectedItem.id,
-      movement_type: "add_stock",
-      quantity_change: qty,
-      quantity_before: beforeQty,
-      quantity_after: afterQty,
-      reason: "إضافة كمية",
-    });
+    if (Number(updatedVariant.stock_quantity) !== afterQty) {
+      setMessage("لم يتم حفظ الكمية الجديدة في قاعدة البيانات");
+      return;
+    }
 
-    setMessage("تمت إضافة الكمية بنجاح");
+    const { error: movementError } = await supabase
+      .from("inventory_movements")
+      .insert({
+        variant_id: selectedItem.id,
+        movement_type:
+          stockOperation === "add" ? "add_stock" : "remove_stock",
+        quantity_change: signedChange,
+        quantity_before: beforeQty,
+        quantity_after: afterQty,
+        reason:
+          stockOperation === "add"
+            ? "إضافة كمية من صفحة المخزون"
+            : "خصم كمية من صفحة المخزون",
+      });
+
+    if (movementError) {
+      const { error: rollbackError } = await supabase
+        .from("product_variants")
+        .update({ stock_quantity: beforeQty })
+        .eq("id", selectedItem.id);
+
+      setMessage(
+        rollbackError
+          ? "فشل تسجيل حركة المخزون وفشل التراجع عن التعديل: " +
+              movementError.message
+          : "تم إلغاء التعديل لأن تسجيل حركة المخزون فشل: " +
+              movementError.message
+      );
+      await loadInventory();
+      return;
+    }
+
+    setMessage(
+      stockOperation === "add"
+        ? "تمت إضافة الكمية بنجاح"
+        : "تم خصم الكمية بنجاح"
+    );
     setSelectedItem(null);
+    setStockOperation("add");
     setAddQty("");
     await loadInventory();
   }
@@ -351,7 +411,7 @@ export default function InventoryPage() {
                         onClick={() => setSelectedItem(item)}
                         className="rounded-lg bg-white px-3 py-2 text-sm font-bold text-black"
                       >
-                        + دفعة
+                        تعديل المخزون
                       </button>
                     </td>
                   </tr>
@@ -365,7 +425,7 @@ export default function InventoryPage() {
       {selectedItem && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
           <div className="w-full max-w-md rounded-2xl bg-neutral-900 p-6">
-            <h2 className="mb-2 text-2xl font-bold">استلام دفعة جديدة</h2>
+            <h2 className="mb-2 text-2xl font-bold">تعديل المخزون</h2>
 
             <p className="mb-6 text-neutral-400">
               {selectedItem.products?.name} - {selectedItem.color} - {selectedItem.size}
@@ -375,13 +435,38 @@ export default function InventoryPage() {
               الكمية الحالية: {selectedItem.stock_quantity}
             </p>
 
+            <select
+              className="mb-3 w-full rounded-xl bg-neutral-800 p-4"
+              value={stockOperation}
+              onChange={(e) =>
+                setStockOperation(e.target.value as "add" | "subtract")
+              }
+            >
+              <option value="add">➕ إضافة للمخزون</option>
+              <option value="subtract">➖ خصم من المخزون</option>
+            </select>
+
             <input
-              className="mb-6 w-full rounded-xl bg-neutral-800 p-4"
+              className="mb-3 w-full rounded-xl bg-neutral-800 p-4"
               type="number"
-              placeholder="الكمية الجديدة"
+              min="1"
+              step="1"
+              placeholder="الكمية"
               value={addQty}
               onChange={(e) => setAddQty(e.target.value)}
             />
+
+            <div className="mb-6 rounded-xl bg-neutral-800 p-4">
+              بعد التعديل:{" "}
+              <span className="font-bold">
+                {Math.max(
+                  0,
+                  Number(selectedItem.stock_quantity || 0) +
+                    (stockOperation === "add" ? 1 : -1) *
+                      Number(addQty || 0)
+                )}
+              </span>
+            </div>
 
             <div className="flex gap-3">
               <button
@@ -394,6 +479,7 @@ export default function InventoryPage() {
               <button
                 onClick={() => {
                   setSelectedItem(null);
+                  setStockOperation("add");
                   setAddQty("");
                 }}
                 className="flex-1 rounded-xl border border-neutral-700 p-3"

@@ -3,6 +3,18 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 
+const COLORS = [
+  "أسود", "أبيض", "كحلي", "وردي", "موف", "بيج", "رمادي", "أحمر", "أخضر", "بني",
+  "سماوي", "زيتي", "كيوي", "فسفوري", "بني غامق", "فوشيا", "نود", "برغندي",
+  "أزرق", "بنفسجي", "جيشي", "موف هادي", "كريمي", "بطاطي", "بيبي بلو",
+  "قهوي غامق", "بني محروق", "نيروزي", "برتقالي", "أصفر", "كشميري", "زهري", "عنابي",
+];
+
+const SIZES = [
+  "XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL",
+  ...Array.from({ length: 25 }, (_, i) => String(i + 36)),
+];
+
 const PRODUCT_TYPES = ["بيجامة", "عباية", "بدلة", "حقيبة", "حذاء", "أخرى"];
 
 const STOCK_REASONS = [
@@ -63,13 +75,22 @@ export default function ProductsPage() {
   const [stockReason, setStockReason] = useState("");
   const [stockNote, setStockNote] = useState("");
 
+  const [editStoreId, setEditStoreId] = useState("");
+  const [editSku, setEditSku] = useState("");
+  const [editDesignCode, setEditDesignCode] = useState("");
   const [editName, setEditName] = useState("");
   const [editModel, setEditModel] = useState("");
+  const [editDescription, setEditDescription] = useState("");
   const [editType, setEditType] = useState("");
   const [editColor, setEditColor] = useState("");
   const [editFabric, setEditFabric] = useState("");
   const [editCostPrice, setEditCostPrice] = useState("");
   const [editSalePrice, setEditSalePrice] = useState("");
+  const [editImageFile, setEditImageFile] = useState<File | null>(null);
+  const [editPreview, setEditPreview] = useState("");
+  const [editSizeRows, setEditSizeRows] = useState(
+    SIZES.map((size) => ({ size, quantity: "" }))
+  );
 
   useEffect(() => {
     loadData();
@@ -102,9 +123,12 @@ export default function ProductsPage() {
         stores(id, name),
         products(
           id,
+          store_id,
           sku,
+          design_code,
           name,
           model,
+          description,
           product_type,
           fabric,
           main_image_url
@@ -168,8 +192,10 @@ export default function ProductsPage() {
     return groupedProducts.filter((item) => {
       const text = `
         ${item.product?.sku || ""}
+        ${item.product?.design_code || ""}
         ${item.product?.name || ""}
         ${item.product?.model || ""}
+        ${item.product?.description || ""}
         ${item.product?.product_type || ""}
         ${item.color || ""}
         ${item.store?.name || ""}
@@ -224,15 +250,56 @@ export default function ProductsPage() {
   }
 
   function openEdit(item: any) {
+    const quantities = new Map<string, string>(
+      (item.sizes || []).map((row: any) => [
+        String(row.size),
+        String(Number(row.quantity || 0)),
+      ])
+    );
+
+    const extraSizes = (item.sizes || [])
+      .map((row: any) => String(row.size))
+      .filter((size: string) => !SIZES.includes(size));
+
+    const allSizes = [...SIZES, ...extraSizes];
+
     setEditItem(item);
+    setEditStoreId(item.store_id || item.product?.store_id || "");
+    setEditSku(item.product?.sku || "");
+    setEditDesignCode(item.product?.design_code || "");
     setEditName(item.product?.name || "");
     setEditModel(item.product?.model || "");
+    setEditDescription(item.product?.description || "");
     setEditType(item.product?.product_type || "");
     setEditColor(item.color || "");
     setEditFabric(item.product?.fabric || "");
     setEditCostPrice(String(item.cost_price || ""));
     setEditSalePrice(String(item.sale_price || ""));
+    setEditImageFile(null);
+    setEditPreview(item.image || item.product?.main_image_url || "");
+    setEditSizeRows(
+      allSizes.map((size) => ({
+        size,
+        quantity: quantities.get(size) || "",
+      }))
+    );
     setMessage("");
+  }
+
+  function updateEditSizeQuantity(size: string, quantity: string) {
+    setEditSizeRows((previous) =>
+      previous.map((row) =>
+        row.size === size ? { ...row, quantity } : row
+      )
+    );
+  }
+
+  function handleEditImageChange(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setEditImageFile(file);
+    setEditPreview(URL.createObjectURL(file));
   }
 
   async function handleStockAdjustment() {
@@ -288,21 +355,51 @@ export default function ProductsPage() {
 
     try {
       for (const row of changes) {
-        const beforeQty = Number(row.quantity || 0);
+        const { data: currentVariant, error: currentError } = await supabase
+          .from("product_variants")
+          .select("id, stock_quantity")
+          .eq("id", row.variant_id)
+          .single();
+
+        if (currentError || !currentVariant) {
+          throw new Error(
+            `تعذر قراءة الكمية الحالية للمقاس ${row.size}: ${currentError?.message || "المقاس غير موجود"}`
+          );
+        }
+
+        const beforeQty = Number(currentVariant.stock_quantity || 0);
+
+        if (
+          row.operation === "subtract" &&
+          row.enteredQuantity > beforeQty
+        ) {
+          throw new Error(
+            `لا يمكن خصم ${row.enteredQuantity} من المقاس ${row.size} لأن الكمية الحالية ${beforeQty} فقط`
+          );
+        }
+
         const signedChange =
           row.operation === "add"
             ? row.enteredQuantity
             : -row.enteredQuantity;
         const afterQty = beforeQty + signedChange;
 
-        const { error: updateError } = await supabase
+        const { data: updatedVariant, error: updateError } = await supabase
           .from("product_variants")
           .update({ stock_quantity: afterQty })
-          .eq("id", row.variant_id);
+          .eq("id", row.variant_id)
+          .select("id, stock_quantity")
+          .single();
 
-        if (updateError) {
+        if (updateError || !updatedVariant) {
           throw new Error(
-            `خطأ في تحديث المقاس ${row.size}: ${updateError.message}`
+            `خطأ في تحديث المقاس ${row.size}: ${updateError?.message || "لم يتم تحديث أي صف"}`
+          );
+        }
+
+        if (Number(updatedVariant.stock_quantity) !== afterQty) {
+          throw new Error(
+            `لم يتم حفظ الكمية الجديدة للمقاس ${row.size}`
           );
         }
 
@@ -351,47 +448,190 @@ export default function ProductsPage() {
   async function handleEditProduct() {
     if (!editItem) return;
 
-    if (!editName || !editType || !editColor || !editCostPrice || !editSalePrice) {
-      setMessage("يجب تعبئة الاسم، النوع، اللون، التكلفة، وسعر البيع");
+    if (
+      !editStoreId ||
+      !editDesignCode.trim() ||
+      !editName.trim() ||
+      !editType ||
+      !editColor ||
+      !editCostPrice ||
+      !editSalePrice
+    ) {
+      setMessage(
+        "يجب تعبئة المتجر، كود التصميم، الاسم، النوع، اللون، التكلفة، وسعر البيع"
+      );
       return;
     }
 
     setMessage("جاري تعديل المنتج...");
 
-    const { error: productError } = await supabase
-      .from("products")
-      .update({
-        name: editName,
-        model: editModel || null,
-        product_type: editType,
-        fabric: editFabric || null,
-        default_cost_price: Number(editCostPrice),
-        default_sale_price: Number(editSalePrice),
-      })
-      .eq("id", editItem.product_id);
+    try {
+      let finalImageUrl =
+        editItem.image || editItem.product?.main_image_url || "";
 
-    if (productError) {
-      setMessage("خطأ في تعديل بيانات المنتج: " + productError.message);
-      return;
+      if (editImageFile) {
+        const fileExt = editImageFile.name.split(".").pop();
+        const safeCode = (editSku || editDesignCode || editItem.product_id)
+          .replace(/[^a-zA-Z0-9_-]/g, "-");
+        const fileName = `${Date.now()}-${safeCode}.${fileExt}`;
+
+        const { error: uploadError } = await supabase.storage
+          .from("product-images")
+          .upload(fileName, editImageFile);
+
+        if (uploadError) {
+          throw new Error("خطأ في رفع الصورة الجديدة: " + uploadError.message);
+        }
+
+        const { data: imageData } = supabase.storage
+          .from("product-images")
+          .getPublicUrl(fileName);
+
+        finalImageUrl = imageData.publicUrl;
+      }
+
+      const { data: updatedProduct, error: productError } = await supabase
+        .from("products")
+        .update({
+          store_id: editStoreId,
+          sku: editSku.trim() || editItem.product?.sku || null,
+          design_code: editDesignCode.trim(),
+          name: editName.trim(),
+          model: editModel.trim() || null,
+          description: editDescription.trim() || null,
+          product_type: editType,
+          fabric: editFabric.trim() || null,
+          main_image_url: finalImageUrl || null,
+          default_cost_price: Number(editCostPrice),
+          default_sale_price: Number(editSalePrice),
+        })
+        .eq("id", editItem.product_id)
+        .select("id")
+        .single();
+
+      if (productError || !updatedProduct) {
+        throw new Error(
+          "خطأ في تعديل بيانات المنتج: " +
+            (productError?.message || "لم يتم تحديث المنتج")
+        );
+      }
+
+      const existingBySize = new Map(
+        (editItem.sizes || []).map((row: any) => [
+          String(row.size),
+          row,
+        ])
+      );
+
+      for (const row of editSizeRows) {
+        const quantityText = String(row.quantity ?? "").trim();
+        const quantity = quantityText === "" ? 0 : Number(quantityText);
+
+        if (!Number.isFinite(quantity) || quantity < 0 || !Number.isInteger(quantity)) {
+          throw new Error(`كمية المقاس ${row.size} يجب أن تكون رقمًا صحيحًا`);
+        }
+
+        const existing: any = existingBySize.get(String(row.size));
+
+        if (existing) {
+          const beforeQty = Number(existing.quantity || 0);
+
+          const { data: updatedVariant, error: variantError } = await supabase
+            .from("product_variants")
+            .update({
+              store_id: editStoreId,
+              color: editColor,
+              stock_quantity: quantity,
+              cost_price: Number(editCostPrice),
+              sale_price: Number(editSalePrice),
+              image_url: finalImageUrl || null,
+            })
+            .eq("id", existing.variant_id)
+            .select("id, stock_quantity")
+            .single();
+
+          if (variantError || !updatedVariant) {
+            throw new Error(
+              `خطأ في تعديل المقاس ${row.size}: ${
+                variantError?.message || "لم يتم تحديث المقاس"
+              }`
+            );
+          }
+
+          const difference = quantity - beforeQty;
+
+          if (difference !== 0) {
+            const { error: movementError } = await supabase
+              .from("inventory_movements")
+              .insert({
+                variant_id: existing.variant_id,
+                movement_type:
+                  difference > 0 ? "add_stock" : "remove_stock",
+                quantity_change: difference,
+                quantity_before: beforeQty,
+                quantity_after: quantity,
+                reason: "تعديل كمية من صفحة تعديل المنتج",
+              });
+
+            if (movementError) {
+              throw new Error(
+                `تم تعديل المقاس ${row.size} لكن فشل تسجيل حركة المخزون: ${movementError.message}`
+              );
+            }
+          }
+        } else if (quantity > 0) {
+          const { data: newVariant, error: insertVariantError } = await supabase
+            .from("product_variants")
+            .insert({
+              store_id: editStoreId,
+              product_id: editItem.product_id,
+              color: editColor,
+              size: row.size,
+              stock_quantity: quantity,
+              cost_price: Number(editCostPrice),
+              sale_price: Number(editSalePrice),
+              image_url: finalImageUrl || null,
+              is_active: true,
+            })
+            .select("id")
+            .single();
+
+          if (insertVariantError || !newVariant) {
+            throw new Error(
+              `خطأ في إضافة المقاس ${row.size}: ${
+                insertVariantError?.message || "لم يتم إنشاء المقاس"
+              }`
+            );
+          }
+
+          const { error: movementError } = await supabase
+            .from("inventory_movements")
+            .insert({
+              variant_id: newVariant.id,
+              movement_type: "add_stock",
+              quantity_change: quantity,
+              quantity_before: 0,
+              quantity_after: quantity,
+              reason: "إضافة مقاس من صفحة تعديل المنتج",
+            });
+
+          if (movementError) {
+            throw new Error(
+              `تمت إضافة المقاس ${row.size} لكن فشل تسجيل حركة المخزون: ${movementError.message}`
+            );
+          }
+        }
+      }
+
+      setEditItem(null);
+      setEditImageFile(null);
+      setEditPreview("");
+      setMessage("تم تعديل المنتج وكل البيانات والمقاسات بنجاح");
+      await loadData();
+    } catch (error: any) {
+      setMessage(error?.message || "حدث خطأ أثناء تعديل المنتج");
+      await loadData();
     }
-
-    const { error: variantsError } = await supabase
-      .from("product_variants")
-      .update({
-        color: editColor,
-        cost_price: Number(editCostPrice),
-        sale_price: Number(editSalePrice),
-      })
-      .in("id", editItem.variant_ids);
-
-    if (variantsError) {
-      setMessage("خطأ في تعديل المقاسات: " + variantsError.message);
-      return;
-    }
-
-    setEditItem(null);
-    setMessage("تم تعديل المنتج بنجاح");
-    await loadData();
   }
 
   async function handleDeleteProduct() {
@@ -510,6 +750,9 @@ export default function ProductsPage() {
                 <p className="text-xl font-bold">{item.product?.name || "-"}</p>
                 <p className="text-sm text-neutral-400">
                   {item.product?.model || "بدون موديل"} / {item.color}
+                </p>
+                <p className="text-sm text-neutral-400">
+                  كود التصميم: {item.product?.design_code || "-"}
                 </p>
                 <p className="text-sm text-neutral-400">
                   النوع: {item.product?.product_type || "-"}
@@ -688,34 +931,186 @@ export default function ProductsPage() {
       )}
 
       {editItem && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
-          <div className="w-full max-w-2xl rounded-2xl bg-neutral-900 p-6">
-            <h2 className="mb-5 text-2xl font-bold">تعديل المنتج</h2>
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-black/70 p-4">
+          <div className="mx-auto my-6 w-full max-w-5xl rounded-2xl bg-neutral-900 p-6">
+            <div className="mb-5 flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-2xl font-bold">تعديل المنتج</h2>
+                <p className="mt-1 text-sm text-neutral-400">
+                  جميع خيارات صفحة إضافة المنتج متاحة هنا
+                </p>
+              </div>
+              <button
+                onClick={() => {
+                  setEditItem(null);
+                  setEditImageFile(null);
+                  setEditPreview("");
+                }}
+                className="rounded-xl border border-neutral-700 px-4 py-2"
+              >
+                إغلاق
+              </button>
+            </div>
 
             <div className="grid gap-3 md:grid-cols-2">
-              <input className="rounded-xl bg-neutral-800 p-4" placeholder="اسم المنتج" value={editName} onChange={(e) => setEditName(e.target.value)} />
-              <input className="rounded-xl bg-neutral-800 p-4" placeholder="الموديل" value={editModel} onChange={(e) => setEditModel(e.target.value)} />
-
-              <select className="rounded-xl bg-neutral-800 p-4" value={editType} onChange={(e) => setEditType(e.target.value)}>
-                <option value="">نوع المنتج</option>
-                {PRODUCT_TYPES.map((type) => (
-                  <option key={type} value={type}>{type}</option>
+              <select
+                className="rounded-xl bg-neutral-800 p-4"
+                value={editStoreId}
+                onChange={(e) => setEditStoreId(e.target.value)}
+              >
+                <option value="">اختر المتجر</option>
+                {stores.map((store) => (
+                  <option key={store.id} value={store.id}>
+                    {store.name}
+                  </option>
                 ))}
               </select>
 
-              <input className="rounded-xl bg-neutral-800 p-4" placeholder="اللون" value={editColor} onChange={(e) => setEditColor(e.target.value)} />
+              <input
+                className="rounded-xl bg-neutral-800 p-4"
+                placeholder="كود المنتج"
+                value={editSku}
+                onChange={(e) => setEditSku(e.target.value)}
+              />
 
-              <input className="rounded-xl bg-neutral-800 p-4" type="number" placeholder="تكلفة القطعة" value={editCostPrice} onChange={(e) => setEditCostPrice(e.target.value)} />
-              <input className="rounded-xl bg-neutral-800 p-4" type="number" placeholder="سعر البيع" value={editSalePrice} onChange={(e) => setEditSalePrice(e.target.value)} />
+              <input
+                className="rounded-xl bg-neutral-800 p-4"
+                placeholder="كود التصميم"
+                value={editDesignCode}
+                onChange={(e) => setEditDesignCode(e.target.value)}
+              />
 
-              <input className="rounded-xl bg-neutral-800 p-4 md:col-span-2" placeholder="الخامة" value={editFabric} onChange={(e) => setEditFabric(e.target.value)} />
+              <input
+                className="rounded-xl bg-neutral-800 p-4"
+                placeholder="اسم المنتج"
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+              />
+
+              <input
+                className="rounded-xl bg-neutral-800 p-4"
+                placeholder="الموديل"
+                value={editModel}
+                onChange={(e) => setEditModel(e.target.value)}
+              />
+
+              <select
+                className="rounded-xl bg-neutral-800 p-4"
+                value={editType}
+                onChange={(e) => setEditType(e.target.value)}
+              >
+                <option value="">نوع المنتج</option>
+                {PRODUCT_TYPES.map((type) => (
+                  <option key={type} value={type}>
+                    {type}
+                  </option>
+                ))}
+              </select>
+
+              <select
+                className="rounded-xl bg-neutral-800 p-4"
+                value={editColor}
+                onChange={(e) => setEditColor(e.target.value)}
+              >
+                <option value="">اختر اللون</option>
+                {COLORS.map((colorOption) => (
+                  <option key={colorOption} value={colorOption}>
+                    {colorOption}
+                  </option>
+                ))}
+              </select>
+
+              <input
+                className="rounded-xl bg-neutral-800 p-4"
+                type="number"
+                placeholder="تكلفة القطعة"
+                value={editCostPrice}
+                onChange={(e) => setEditCostPrice(e.target.value)}
+              />
+
+              <input
+                className="rounded-xl bg-neutral-800 p-4"
+                type="number"
+                placeholder="سعر البيع"
+                value={editSalePrice}
+                onChange={(e) => setEditSalePrice(e.target.value)}
+              />
+
+              <input
+                className="rounded-xl bg-neutral-800 p-4"
+                placeholder="الخامة"
+                value={editFabric}
+                onChange={(e) => setEditFabric(e.target.value)}
+              />
+
+              <textarea
+                className="min-h-28 rounded-xl bg-neutral-800 p-4 md:col-span-2"
+                placeholder="وصف المنتج"
+                value={editDescription}
+                onChange={(e) => setEditDescription(e.target.value)}
+              />
             </div>
 
-            <div className="mt-6 flex gap-3">
-              <button onClick={handleEditProduct} className="flex-1 rounded-xl bg-white p-3 font-bold text-black">
-                حفظ التعديل
+            <div className="mt-5 rounded-2xl border border-neutral-800 bg-neutral-950 p-5">
+              <label className="mb-3 block font-bold">صورة المنتج / اللون</label>
+              <input
+                type="file"
+                accept="image/*"
+                onChange={handleEditImageChange}
+              />
+              {editPreview && (
+                <img
+                  src={editPreview}
+                  alt="Preview"
+                  className="mt-4 h-48 w-48 rounded-xl object-cover"
+                />
+              )}
+            </div>
+
+            <div className="mt-5 rounded-2xl border border-neutral-800 bg-neutral-950 p-5">
+              <h3 className="mb-2 text-xl font-bold">المقاسات والكميات</h3>
+              <p className="mb-4 text-sm text-neutral-400">
+                يمكنك تعديل كمية أي مقاس أو إضافة مقاس جديد. اكتب 0 لتصفير المقاس.
+              </p>
+
+              <div className="grid max-h-[42vh] gap-3 overflow-y-auto md:grid-cols-5">
+                {editSizeRows.map((row) => (
+                  <div
+                    key={row.size}
+                    className="rounded-xl bg-neutral-800 p-3"
+                  >
+                    <label className="mb-2 block font-bold">{row.size}</label>
+                    <input
+                      className="w-full rounded-lg bg-neutral-900 p-3"
+                      type="number"
+                      min="0"
+                      step="1"
+                      placeholder="الكمية"
+                      value={row.quantity}
+                      onChange={(e) =>
+                        updateEditSizeQuantity(row.size, e.target.value)
+                      }
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="sticky bottom-0 mt-6 flex gap-3 border-t border-neutral-800 bg-neutral-900 pt-4">
+              <button
+                onClick={handleEditProduct}
+                className="flex-1 rounded-xl bg-white p-3 font-bold text-black"
+              >
+                حفظ كل التعديلات
               </button>
-              <button onClick={() => setEditItem(null)} className="flex-1 rounded-xl border border-neutral-700 p-3">
+              <button
+                onClick={() => {
+                  setEditItem(null);
+                  setEditImageFile(null);
+                  setEditPreview("");
+                }}
+                className="flex-1 rounded-xl border border-neutral-700 p-3"
+              >
                 إلغاء
               </button>
             </div>
