@@ -23,8 +23,10 @@ export default function NewProductPage() {
 
   const [storeId, setStoreId] = useState("");
   const [sku, setSku] = useState("");
+  const [designCode, setDesignCode] = useState("");
   const [name, setName] = useState("");
   const [model, setModel] = useState("");
+  const [description, setDescription] = useState("");
   const [productType, setProductType] = useState("");
   const [color, setColor] = useState("");
   const [costPrice, setCostPrice] = useState("");
@@ -70,8 +72,10 @@ export default function NewProductPage() {
 
   function resetForm() {
     setSku("");
+    setDesignCode("");
     setName("");
     setModel("");
+    setDescription("");
     setProductType("");
     setColor("");
     setCostPrice("");
@@ -86,8 +90,8 @@ export default function NewProductPage() {
     e.preventDefault();
     setMessage("جاري حفظ المنتج...");
 
-    if (!storeId || !name || !productType || !color || !costPrice || !salePrice) {
-      setMessage("يجب تعبئة المتجر، اسم المنتج، النوع، اللون، التكلفة، وسعر البيع");
+    if (!storeId || !designCode.trim() || !name || !productType || !color || !costPrice || !salePrice) {
+      setMessage("يجب تعبئة المتجر، كود التصميم، اسم المنتج، النوع، اللون، التكلفة، وسعر البيع");
       return;
     }
 
@@ -124,8 +128,10 @@ export default function NewProductPage() {
       .insert({
         store_id: storeId,
         sku: finalSku,
+        design_code: designCode.trim(),
         name,
         model: model || null,
+        description: description.trim() || null,
         product_type: productType,
         fabric: fabric || null,
         main_image_url: imageUrl || null,
@@ -205,6 +211,14 @@ export default function NewProductPage() {
 
           <input
             className="rounded-xl bg-neutral-900 p-4"
+            placeholder="كود التصميم - مثال: ST-001"
+            value={designCode}
+            onChange={(e) => setDesignCode(e.target.value)}
+            required
+          />
+
+          <input
+            className="rounded-xl bg-neutral-900 p-4"
             placeholder="اسم المنتج مثل: Dior"
             value={name}
             onChange={(e) => setName(e.target.value)}
@@ -215,6 +229,13 @@ export default function NewProductPage() {
             placeholder="الموديل اختياري مثل: Oversize"
             value={model}
             onChange={(e) => setModel(e.target.value)}
+          />
+
+          <textarea
+            className="min-h-28 rounded-xl bg-neutral-900 p-4 md:col-span-2"
+            placeholder="وصف المنتج - مثال: بدلة لينو رابطة، قصة واسعة، خامة خفيفة..."
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
           />
 
           <select
