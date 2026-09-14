@@ -1096,6 +1096,12 @@ export default function ProductsPage() {
               </div>
             </div>
 
+            {message && (
+              <div className="mt-5 rounded-xl border border-yellow-700 bg-yellow-950/30 p-4 text-yellow-300">
+                {message}
+              </div>
+            )}
+
             <div className="sticky bottom-0 mt-6 flex gap-3 border-t border-neutral-800 bg-neutral-900 pt-4">
               <button
                 onClick={handleEditProduct}
