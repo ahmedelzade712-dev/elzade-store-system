@@ -69,6 +69,7 @@ export default function ProductsPage() {
   const [stockItem, setStockItem] = useState<any>(null);
   const [savingStock, setSavingStock] = useState(false);
   const [editItem, setEditItem] = useState<any>(null);
+  const [savingEdit, setSavingEdit] = useState(false);
   const [deleteItem, setDeleteItem] = useState<any>(null);
 
   const [stockInputs, setStockInputs] = useState<Record<string, StockInput>>({});
@@ -207,6 +208,16 @@ export default function ProductsPage() {
       );
     });
   }, [groupedProducts, search, storeFilter]);
+
+  const designCodes = useMemo(() => {
+    return Array.from(
+      new Set(
+        variants
+          .map((variant) => String(variant.products?.design_code || "").trim())
+          .filter(Boolean)
+      )
+    ).sort((a, b) => a.localeCompare(b, "en"));
+  }, [variants]);
 
   function openStockAdjustment(item: any) {
     const inputs: Record<string, StockInput> = {};
@@ -446,7 +457,7 @@ export default function ProductsPage() {
   }
 
   async function handleEditProduct() {
-    if (!editItem) return;
+    if (!editItem || savingEdit) return;
 
     if (
       !editStoreId ||
@@ -463,7 +474,8 @@ export default function ProductsPage() {
       return;
     }
 
-    setMessage("جاري تعديل المنتج...");
+    setSavingEdit(true);
+    setMessage("جاري حفظ بيانات المنتج...");
 
     try {
       let finalImageUrl =
@@ -494,7 +506,7 @@ export default function ProductsPage() {
         .from("products")
         .update({
           store_id: editStoreId,
-          sku: editSku.trim() || editItem.product?.sku || null,
+          sku: editSku.trim() || null,
           design_code: editDesignCode.trim(),
           name: editName.trim(),
           model: editModel.trim() || null,
@@ -506,131 +518,73 @@ export default function ProductsPage() {
           default_sale_price: Number(editSalePrice),
         })
         .eq("id", editItem.product_id)
-        .select("id")
+        .select("id, design_code, description, name")
         .single();
 
       if (productError || !updatedProduct) {
         throw new Error(
-          "خطأ في تعديل بيانات المنتج: " +
+          "خطأ في حفظ بيانات المنتج: " +
             (productError?.message || "لم يتم تحديث المنتج")
         );
       }
 
-      const existingBySize = new Map(
-        (editItem.sizes || []).map((row: any) => [
-          String(row.size),
-          row,
-        ])
-      );
+      // Update the current color variants' common data only.
+      // Stock quantities are intentionally NOT touched here.
+      const currentVariantIds = (editItem.variant_ids || []).filter(Boolean);
 
-      for (const row of editSizeRows) {
-        const quantityText = String(row.quantity ?? "").trim();
-        const quantity = quantityText === "" ? 0 : Number(quantityText);
+      if (currentVariantIds.length > 0) {
+        const { error: variantsError } = await supabase
+          .from("product_variants")
+          .update({
+            store_id: editStoreId,
+            color: editColor,
+            cost_price: Number(editCostPrice),
+            sale_price: Number(editSalePrice),
+            image_url: finalImageUrl || null,
+          })
+          .in("id", currentVariantIds);
 
-        if (!Number.isFinite(quantity) || quantity < 0 || !Number.isInteger(quantity)) {
-          throw new Error(`كمية المقاس ${row.size} يجب أن تكون رقمًا صحيحًا`);
-        }
-
-        const existing: any = existingBySize.get(String(row.size));
-
-        if (existing) {
-          const beforeQty = Number(existing.quantity || 0);
-
-          const { data: updatedVariant, error: variantError } = await supabase
-            .from("product_variants")
-            .update({
-              store_id: editStoreId,
-              color: editColor,
-              stock_quantity: quantity,
-              cost_price: Number(editCostPrice),
-              sale_price: Number(editSalePrice),
-              image_url: finalImageUrl || null,
-            })
-            .eq("id", existing.variant_id)
-            .select("id, stock_quantity")
-            .single();
-
-          if (variantError || !updatedVariant) {
-            throw new Error(
-              `خطأ في تعديل المقاس ${row.size}: ${
-                variantError?.message || "لم يتم تحديث المقاس"
-              }`
-            );
-          }
-
-          const difference = quantity - beforeQty;
-
-          if (difference !== 0) {
-            const { error: movementError } = await supabase
-              .from("inventory_movements")
-              .insert({
-                variant_id: existing.variant_id,
-                movement_type:
-                  difference > 0 ? "add_stock" : "remove_stock",
-                quantity_change: difference,
-                quantity_before: beforeQty,
-                quantity_after: quantity,
-                reason: "تعديل كمية من صفحة تعديل المنتج",
-              });
-
-            if (movementError) {
-              throw new Error(
-                `تم تعديل المقاس ${row.size} لكن فشل تسجيل حركة المخزون: ${movementError.message}`
-              );
-            }
-          }
-        } else if (quantity > 0) {
-          const { data: newVariant, error: insertVariantError } = await supabase
-            .from("product_variants")
-            .insert({
-              store_id: editStoreId,
-              product_id: editItem.product_id,
-              color: editColor,
-              size: row.size,
-              stock_quantity: quantity,
-              cost_price: Number(editCostPrice),
-              sale_price: Number(editSalePrice),
-              image_url: finalImageUrl || null,
-              is_active: true,
-            })
-            .select("id")
-            .single();
-
-          if (insertVariantError || !newVariant) {
-            throw new Error(
-              `خطأ في إضافة المقاس ${row.size}: ${
-                insertVariantError?.message || "لم يتم إنشاء المقاس"
-              }`
-            );
-          }
-
-          const { error: movementError } = await supabase
-            .from("inventory_movements")
-            .insert({
-              variant_id: newVariant.id,
-              movement_type: "add_stock",
-              quantity_change: quantity,
-              quantity_before: 0,
-              quantity_after: quantity,
-              reason: "إضافة مقاس من صفحة تعديل المنتج",
-            });
-
-          if (movementError) {
-            throw new Error(
-              `تمت إضافة المقاس ${row.size} لكن فشل تسجيل حركة المخزون: ${movementError.message}`
-            );
-          }
+        if (variantsError) {
+          throw new Error(
+            "تم حفظ بيانات المنتج، لكن حدث خطأ في تحديث بيانات اللون/السعر: " +
+              variantsError.message
+          );
         }
       }
 
-      setEditItem(null);
+      // Verify the exact fields the user edited actually persisted.
+      const { data: verifyProduct, error: verifyError } = await supabase
+        .from("products")
+        .select("id, design_code, description, name, model, product_type, fabric")
+        .eq("id", editItem.product_id)
+        .single();
+
+      if (verifyError || !verifyProduct) {
+        throw new Error(
+          "تم إرسال التعديل لكن تعذر التحقق من حفظه: " +
+            (verifyError?.message || "تعذر قراءة المنتج")
+        );
+      }
+
+      if (
+        String(verifyProduct.design_code || "") !== editDesignCode.trim() ||
+        String(verifyProduct.description || "") !== editDescription.trim()
+      ) {
+        throw new Error(
+          "لم يتم حفظ كود التصميم أو وصف المنتج كما هو مكتوب. أعد المحاولة."
+        );
+      }
+
+      setMessage("تم حفظ بيانات المنتج بنجاح");
       setEditImageFile(null);
-      setEditPreview("");
-      setMessage("تم تعديل المنتج وكل البيانات والمقاسات بنجاح");
+      setEditPreview(finalImageUrl || "");
       await loadData();
+      setEditItem(null);
     } catch (error: any) {
-      setMessage(error?.message || "حدث خطأ أثناء تعديل المنتج");
-      await loadData();
+      // Do NOT call loadData here because loadData clears the error message.
+      setMessage(error?.message || "حدث خطأ أثناء حفظ بيانات المنتج");
+    } finally {
+      setSavingEdit(false);
     }
   }
 
@@ -973,12 +927,31 @@ export default function ProductsPage() {
                 onChange={(e) => setEditSku(e.target.value)}
               />
 
-              <input
-                className="rounded-xl bg-neutral-800 p-4"
-                placeholder="كود التصميم"
-                value={editDesignCode}
-                onChange={(e) => setEditDesignCode(e.target.value)}
-              />
+              <div className="grid gap-2">
+                <select
+                  className="rounded-xl bg-neutral-800 p-4"
+                  value={designCodes.includes(editDesignCode) ? editDesignCode : ""}
+                  onChange={(e) => {
+                    if (e.target.value) {
+                      setEditDesignCode(e.target.value);
+                    }
+                  }}
+                >
+                  <option value="">اختر كود تصميم موجود</option>
+                  {designCodes.map((code) => (
+                    <option key={code} value={code}>
+                      {code}
+                    </option>
+                  ))}
+                </select>
+
+                <input
+                  className="rounded-xl bg-neutral-800 p-4"
+                  placeholder="أو اكتب كود تصميم جديد"
+                  value={editDesignCode}
+                  onChange={(e) => setEditDesignCode(e.target.value)}
+                />
+              </div>
 
               <input
                 className="rounded-xl bg-neutral-800 p-4"
@@ -1068,29 +1041,19 @@ export default function ProductsPage() {
             </div>
 
             <div className="mt-5 rounded-2xl border border-neutral-800 bg-neutral-950 p-5">
-              <h3 className="mb-2 text-xl font-bold">المقاسات والكميات</h3>
+              <h3 className="mb-2 text-xl font-bold">المقاسات والكميات الحالية</h3>
               <p className="mb-4 text-sm text-neutral-400">
-                يمكنك تعديل كمية أي مقاس أو إضافة مقاس جديد. اكتب 0 لتصفير المقاس.
+                تعديل الكميات يتم من زر "تعديل المخزون" حتى لا يؤثر فشل المخزون على حفظ كود التصميم أو وصف المنتج.
               </p>
 
               <div className="grid max-h-[42vh] gap-3 overflow-y-auto md:grid-cols-5">
-                {editSizeRows.map((row) => (
+                {editItem.sizes.map((row: any) => (
                   <div
-                    key={row.size}
+                    key={row.variant_id}
                     className="rounded-xl bg-neutral-800 p-3"
                   >
-                    <label className="mb-2 block font-bold">{row.size}</label>
-                    <input
-                      className="w-full rounded-lg bg-neutral-900 p-3"
-                      type="number"
-                      min="0"
-                      step="1"
-                      placeholder="الكمية"
-                      value={row.quantity}
-                      onChange={(e) =>
-                        updateEditSizeQuantity(row.size, e.target.value)
-                      }
-                    />
+                    <p className="font-bold">{row.size}</p>
+                    <p className="mt-1 text-neutral-300">{row.quantity} قطعة</p>
                   </div>
                 ))}
               </div>
@@ -1105,17 +1068,20 @@ export default function ProductsPage() {
             <div className="sticky bottom-0 mt-6 flex gap-3 border-t border-neutral-800 bg-neutral-900 pt-4">
               <button
                 onClick={handleEditProduct}
-                className="flex-1 rounded-xl bg-white p-3 font-bold text-black"
+                disabled={savingEdit}
+                className="flex-1 rounded-xl bg-white p-3 font-bold text-black disabled:cursor-not-allowed disabled:opacity-60"
               >
-                حفظ كل التعديلات
+                {savingEdit ? "جاري الحفظ..." : "حفظ بيانات المنتج"}
               </button>
               <button
                 onClick={() => {
+                  if (savingEdit) return;
                   setEditItem(null);
                   setEditImageFile(null);
                   setEditPreview("");
                 }}
-                className="flex-1 rounded-xl border border-neutral-700 p-3"
+                disabled={savingEdit}
+                className="flex-1 rounded-xl border border-neutral-700 p-3 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 إلغاء
               </button>
