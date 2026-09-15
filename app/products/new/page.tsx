@@ -1,42 +1,42 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 
 const COLORS = [
-  "أسود",
-  "أبيض",
-  "كحلي",
-  "وردي",
-  "موف",
-  "بيج",
-  "رمادي",
-  "أحمر",
-  "أخضر",
-  "بني",
-  "سماوي",
-  "زيتي",
-  "كيوي",
-  "فسفوري",
-  "بني غامق",
-  "فوشيا",
-  "نود",
-  "برغندي",
-  "أزرق",
-  "بنفسجي",
-  "جيشي",
-  "موف هادي",
-  "كريمي",
-  "بطاطي",
-  "بيبي بلو",
-  "قهوي غامق",
-  "بني محروق",
-  "نيروزي",
-  "برتقالي",
-  "أصفر",
-  "كشميري",
-  "زهري",
-  "عنابي",
+  "╪ث╪│┘ê╪»",
+  "╪ث╪ذ┘è╪╢",
+  "┘â╪ص┘┘è",
+  "┘ê╪▒╪»┘è",
+  "┘à┘ê┘",
+  "╪ذ┘è╪ش",
+  "╪▒┘à╪د╪»┘è",
+  "╪ث╪ص┘à╪▒",
+  "╪ث╪«╪╢╪▒",
+  "╪ذ┘┘è",
+  "╪│┘à╪د┘ê┘è",
+  "╪▓┘è╪ز┘è",
+  "┘â┘è┘ê┘è",
+  "┘╪│┘┘ê╪▒┘è",
+  "╪ذ┘┘è ╪║╪د┘à┘é",
+  "┘┘ê╪┤┘è╪د",
+  "┘┘ê╪»",
+  "╪ذ╪▒╪║┘╪»┘è",
+  "╪ث╪▓╪▒┘é",
+  "╪ذ┘┘╪│╪ش┘è",
+  "╪ش┘è╪┤┘è",
+  "┘à┘ê┘ ┘ç╪د╪»┘è",
+  "┘â╪▒┘è┘à┘è",
+  "╪ذ╪╖╪د╪╖┘è",
+  "╪ذ┘è╪ذ┘è ╪ذ┘┘ê",
+  "┘é┘ç┘ê┘è ╪║╪د┘à┘é",
+  "╪ذ┘┘è ┘à╪ص╪▒┘ê┘é",
+  "┘┘è╪▒┘ê╪▓┘è",
+  "╪ذ╪▒╪ز┘é╪د┘┘è",
+  "╪ث╪╡┘╪▒",
+  "┘â╪┤┘à┘è╪▒┘è",
+  "╪▓┘ç╪▒┘è",
+  "╪╣┘╪د╪ذ┘è",
 ];
 
 const SIZES = [
@@ -51,7 +51,7 @@ const SIZES = [
   ...Array.from({ length: 25 }, (_, i) => String(i + 36)),
 ];
 
-const PRODUCT_TYPES = ["بيجامة", "عباية", "بدلة", "حقيبة", "حذاء", "أخرى"];
+const PRODUCT_TYPES = ["╪ذ┘è╪ش╪د┘à╪ر", "╪╣╪ذ╪د┘è╪ر", "╪ذ╪»┘╪ر", "╪ص┘é┘è╪ذ╪ر", "╪ص╪░╪د╪ة", "╪ث╪«╪▒┘ë"];
 
 export default function NewProductPage() {
   const [stores, setStores] = useState<any[]>([]);
@@ -89,7 +89,7 @@ export default function NewProductPage() {
         .order("name");
 
       if (error) {
-        setMessage("تعذر تحميل المتاجر: " + error.message);
+        setMessage("╪ز╪╣╪░╪▒ ╪ز╪ص┘à┘è┘ ╪د┘┘à╪ز╪د╪ش╪▒: " + error.message);
         return;
       }
 
@@ -104,7 +104,7 @@ export default function NewProductPage() {
     if (!file) return;
 
     if (!file.type.startsWith("image/")) {
-      setMessage("الملف المختار يجب أن يكون صورة");
+      setMessage("╪د┘┘à┘┘ ╪د┘┘à╪«╪ز╪د╪▒ ┘è╪ش╪ذ ╪ث┘ ┘è┘â┘ê┘ ╪╡┘ê╪▒╪ر");
       return;
     }
 
@@ -167,13 +167,13 @@ export default function NewProductPage() {
 
     if (requiredMissing) {
       setMessage(
-        "يجب تعبئة المتجر، كود التصميم، اسم المنتج، النوع، اللون، الخامة، وصف المنتج، العلامات المميزة للـAI، التكلفة، سعر البيع، وصورة المنتج"
+        "┘è╪ش╪ذ ╪ز╪╣╪ذ╪خ╪ر ╪د┘┘à╪ز╪ش╪▒╪î ┘â┘ê╪» ╪د┘╪ز╪╡┘à┘è┘à╪î ╪د╪│┘à ╪د┘┘à┘╪ز╪ش╪î ╪د┘┘┘ê╪╣╪î ╪د┘┘┘ê┘╪î ╪د┘╪«╪د┘à╪ر╪î ┘ê╪╡┘ ╪د┘┘à┘╪ز╪ش╪î ╪د┘╪╣┘╪د┘à╪د╪ز ╪د┘┘à┘à┘è╪▓╪ر ┘┘┘AI╪î ╪د┘╪ز┘â┘┘╪ر╪î ╪│╪╣╪▒ ╪د┘╪ذ┘è╪╣╪î ┘ê╪╡┘ê╪▒╪ر ╪د┘┘à┘╪ز╪ش"
       );
       return;
     }
 
     if (selectedSizeRows.length === 0) {
-      setMessage("يجب إدخال كمية لمقاس واحد على الأقل");
+      setMessage("┘è╪ش╪ذ ╪ح╪»╪«╪د┘ ┘â┘à┘è╪ر ┘┘à┘é╪د╪│ ┘ê╪د╪ص╪» ╪╣┘┘ë ╪د┘╪ث┘é┘");
       return;
     }
 
@@ -186,12 +186,12 @@ export default function NewProductPage() {
       !Number.isFinite(numericSalePrice) ||
       numericSalePrice < 0
     ) {
-      setMessage("التكلفة وسعر البيع يجب أن يكونا أرقامًا صحيحة");
+      setMessage("╪د┘╪ز┘â┘┘╪ر ┘ê╪│╪╣╪▒ ╪د┘╪ذ┘è╪╣ ┘è╪ش╪ذ ╪ث┘ ┘è┘â┘ê┘╪د ╪ث╪▒┘é╪د┘à┘ï╪د ╪╡╪ص┘è╪ص╪ر");
       return;
     }
 
     setSaving(true);
-    setMessage("جاري حفظ المنتج...");
+    setMessage("╪ش╪د╪▒┘è ╪ص┘╪╕ ╪د┘┘à┘╪ز╪ش...");
 
     const finalSku = sku.trim() || `PRD-${Date.now()}`;
     let imageUrl = "";
@@ -210,7 +210,7 @@ export default function NewProductPage() {
         });
 
       if (uploadError) {
-        throw new Error("خطأ في رفع الصورة: " + uploadError.message);
+        throw new Error("╪«╪╖╪ث ┘┘è ╪▒┘╪╣ ╪د┘╪╡┘ê╪▒╪ر: " + uploadError.message);
       }
 
       const { data: publicUrlData } = supabase.storage
@@ -240,7 +240,7 @@ export default function NewProductPage() {
         .single();
 
       if (productError || !product) {
-        throw new Error("خطأ في حفظ المنتج: " + (productError?.message || "خطأ غير معروف"));
+        throw new Error("╪«╪╖╪ث ┘┘è ╪ص┘╪╕ ╪د┘┘à┘╪ز╪ش: " + (productError?.message || "╪«╪╖╪ث ╪║┘è╪▒ ┘à╪╣╪▒┘ê┘"));
       }
 
       createdProductId = product.id;
@@ -262,10 +262,10 @@ export default function NewProductPage() {
         .insert(variantsToInsert);
 
       if (variantError) {
-        throw new Error("خطأ في حفظ المقاسات: " + variantError.message);
+        throw new Error("╪«╪╖╪ث ┘┘è ╪ص┘╪╕ ╪د┘┘à┘é╪د╪│╪د╪ز: " + variantError.message);
       }
 
-      setMessage("تم حفظ المنتج وكل المقاسات في المخزون بنجاح");
+      setMessage("╪ز┘à ╪ص┘╪╕ ╪د┘┘à┘╪ز╪ش ┘ê┘â┘ ╪د┘┘à┘é╪د╪│╪د╪ز ┘┘è ╪د┘┘à╪«╪▓┘ê┘ ╪ذ┘╪ش╪د╪ص");
       resetForm();
     } catch (error: any) {
       if (createdProductId) {
@@ -276,7 +276,7 @@ export default function NewProductPage() {
         await supabase.storage.from("product-images").remove([uploadedFileName]);
       }
 
-      setMessage(error?.message || "حدث خطأ أثناء حفظ المنتج");
+      setMessage(error?.message || "╪ص╪»╪س ╪«╪╖╪ث ╪ث╪س┘╪د╪ة ╪ص┘╪╕ ╪د┘┘à┘╪ز╪ش");
     } finally {
       setSaving(false);
     }
@@ -286,9 +286,9 @@ export default function NewProductPage() {
     <main dir="rtl" className="min-h-screen bg-neutral-950 p-8 text-white">
       <div className="mb-8 flex items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold">إضافة منتج إلى المخزون</h1>
+          <h1 className="text-3xl font-bold">╪ح╪╢╪د┘╪ر ┘à┘╪ز╪ش ╪ح┘┘ë ╪د┘┘à╪«╪▓┘ê┘</h1>
           <p className="mt-2 text-neutral-400">
-            أدخل بيانات اللون الحالي بدقة. استخدم نفس كود التصميم لكل ألوان نفس التصميم.
+            ╪ث╪»╪«┘ ╪ذ┘è╪د┘╪د╪ز ╪د┘┘┘ê┘ ╪د┘╪ص╪د┘┘è ╪ذ╪»┘é╪ر. ╪د╪│╪ز╪«╪»┘à ┘┘╪│ ┘â┘ê╪» ╪د┘╪ز╪╡┘à┘è┘à ┘┘â┘ ╪ث┘┘ê╪د┘ ┘┘╪│ ╪د┘╪ز╪╡┘à┘è┘à.
           </p>
         </div>
 
@@ -296,24 +296,24 @@ export default function NewProductPage() {
           href="/products"
           className="rounded-xl border border-neutral-700 px-5 py-3"
         >
-          عرض المنتجات
+          ╪╣╪▒╪╢ ╪د┘┘à┘╪ز╪ش╪د╪ز
         </a>
       </div>
 
       <form onSubmit={handleSubmit} className="grid max-w-6xl grid-cols-1 gap-6">
         <section className="rounded-2xl border border-neutral-800 bg-neutral-900 p-5">
-          <h2 className="mb-4 text-xl font-bold">البيانات الأساسية</h2>
+          <h2 className="mb-4 text-xl font-bold">╪د┘╪ذ┘è╪د┘╪د╪ز ╪د┘╪ث╪│╪د╪│┘è╪ر</h2>
 
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <label className="grid gap-2">
-              <span className="text-sm text-neutral-300">المتجر *</span>
+              <span className="text-sm text-neutral-300">╪د┘┘à╪ز╪ش╪▒ *</span>
               <select
                 className="rounded-xl bg-neutral-800 p-4"
                 value={storeId}
                 onChange={(e) => setStoreId(e.target.value)}
                 required
               >
-                <option value="">اختر المتجر</option>
+                <option value="">╪د╪«╪ز╪▒ ╪د┘┘à╪ز╪ش╪▒</option>
                 {stores.map((store) => (
                   <option key={store.id} value={store.id}>
                     {store.name}
@@ -323,34 +323,34 @@ export default function NewProductPage() {
             </label>
 
             <label className="grid gap-2">
-              <span className="text-sm text-neutral-300">كود المنتج</span>
+              <span className="text-sm text-neutral-300">┘â┘ê╪» ╪د┘┘à┘╪ز╪ش</span>
               <input
                 className="rounded-xl bg-neutral-800 p-4"
-                placeholder="اختياري - يضاف تلقائيًا إذا تركته فارغًا"
+                placeholder="╪د╪«╪ز┘è╪د╪▒┘è - ┘è╪╢╪د┘ ╪ز┘┘é╪د╪خ┘è┘ï╪د ╪ح╪░╪د ╪ز╪▒┘â╪ز┘ç ┘╪د╪▒╪║┘ï╪د"
                 value={sku}
                 onChange={(e) => setSku(e.target.value)}
               />
             </label>
 
             <label className="grid gap-2">
-              <span className="text-sm text-neutral-300">كود التصميم *</span>
+              <span className="text-sm text-neutral-300">┘â┘ê╪» ╪د┘╪ز╪╡┘à┘è┘à *</span>
               <input
                 className="rounded-xl bg-neutral-800 p-4"
-                placeholder="مثال: LIENE-R-001"
+                placeholder="┘à╪س╪د┘: LIENE-R-001"
                 value={designCode}
                 onChange={(e) => setDesignCode(e.target.value)}
                 required
               />
               <span className="text-xs text-neutral-500">
-                جميع ألوان نفس التصميم يجب أن تحمل نفس الكود.
+                ╪ش┘à┘è╪╣ ╪ث┘┘ê╪د┘ ┘┘╪│ ╪د┘╪ز╪╡┘à┘è┘à ┘è╪ش╪ذ ╪ث┘ ╪ز╪ص┘à┘ ┘┘╪│ ╪د┘┘â┘ê╪».
               </span>
             </label>
 
             <label className="grid gap-2">
-              <span className="text-sm text-neutral-300">اسم المنتج *</span>
+              <span className="text-sm text-neutral-300">╪د╪│┘à ╪د┘┘à┘╪ز╪ش *</span>
               <input
                 className="rounded-xl bg-neutral-800 p-4"
-                placeholder="مثال: بدلة لينو"
+                placeholder="┘à╪س╪د┘: ╪ذ╪»┘╪ر ┘┘è┘┘ê"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 required
@@ -358,14 +358,14 @@ export default function NewProductPage() {
             </label>
 
             <label className="grid gap-2">
-              <span className="text-sm text-neutral-300">نوع المنتج *</span>
+              <span className="text-sm text-neutral-300">┘┘ê╪╣ ╪د┘┘à┘╪ز╪ش *</span>
               <select
                 className="rounded-xl bg-neutral-800 p-4"
                 value={productType}
                 onChange={(e) => setProductType(e.target.value)}
                 required
               >
-                <option value="">اختر نوع المنتج</option>
+                <option value="">╪د╪«╪ز╪▒ ┘┘ê╪╣ ╪د┘┘à┘╪ز╪ش</option>
                 {PRODUCT_TYPES.map((type) => (
                   <option key={type} value={type}>
                     {type}
@@ -375,20 +375,20 @@ export default function NewProductPage() {
             </label>
 
             <label className="grid gap-2">
-              <span className="text-sm text-neutral-300">الموديل / القصة</span>
+              <span className="text-sm text-neutral-300">╪د┘┘à┘ê╪»┘è┘ / ╪د┘┘é╪╡╪ر</span>
               <input
                 className="rounded-xl bg-neutral-800 p-4"
-                placeholder="اختياري - مثال: Oversize"
+                placeholder="╪د╪«╪ز┘è╪د╪▒┘è - ┘à╪س╪د┘: Oversize"
                 value={model}
                 onChange={(e) => setModel(e.target.value)}
               />
             </label>
 
             <label className="grid gap-2">
-              <span className="text-sm text-neutral-300">الخامة *</span>
+              <span className="text-sm text-neutral-300">╪د┘╪«╪د┘à╪ر *</span>
               <input
                 className="rounded-xl bg-neutral-800 p-4"
-                placeholder="مثال: لينو / ستان / قطن"
+                placeholder="┘à╪س╪د┘: ┘┘è┘┘ê / ╪│╪ز╪د┘ / ┘é╪╖┘"
                 value={fabric}
                 onChange={(e) => setFabric(e.target.value)}
                 required
@@ -396,14 +396,14 @@ export default function NewProductPage() {
             </label>
 
             <label className="grid gap-2">
-              <span className="text-sm text-neutral-300">اللون *</span>
+              <span className="text-sm text-neutral-300">╪د┘┘┘ê┘ *</span>
               <select
                 className="rounded-xl bg-neutral-800 p-4"
                 value={color}
                 onChange={(e) => setColor(e.target.value)}
                 required
               >
-                <option value="">اختر اللون</option>
+                <option value="">╪د╪«╪ز╪▒ ╪د┘┘┘ê┘</option>
                 {COLORS.map((c) => (
                   <option key={c} value={c}>
                     {c}
@@ -415,17 +415,17 @@ export default function NewProductPage() {
         </section>
 
         <section className="rounded-2xl border border-neutral-800 bg-neutral-900 p-5">
-          <h2 className="mb-2 text-xl font-bold">بيانات تساعد الـAI على فهم التصميم</h2>
+          <h2 className="mb-2 text-xl font-bold">╪ذ┘è╪د┘╪د╪ز ╪ز╪│╪د╪╣╪» ╪د┘┘AI ╪╣┘┘ë ┘┘ç┘à ╪د┘╪ز╪╡┘à┘è┘à</h2>
           <p className="mb-4 text-sm text-neutral-400">
-            الصورة هي المرجع الأساسي. هذه الحقول تساعد الـAI عند وجود تصميمات متشابهة.
+            ╪د┘╪╡┘ê╪▒╪ر ┘ç┘è ╪د┘┘à╪▒╪ش╪╣ ╪د┘╪ث╪│╪د╪│┘è. ┘ç╪░┘ç ╪د┘╪ص┘é┘ê┘ ╪ز╪│╪د╪╣╪» ╪د┘┘AI ╪╣┘╪» ┘ê╪ش┘ê╪» ╪ز╪╡┘à┘è┘à╪د╪ز ┘à╪ز╪┤╪د╪ذ┘ç╪ر.
           </p>
 
           <div className="grid gap-4">
             <label className="grid gap-2">
-              <span className="text-sm text-neutral-300">وصف المنتج *</span>
+              <span className="text-sm text-neutral-300">┘ê╪╡┘ ╪د┘┘à┘╪ز╪ش *</span>
               <textarea
                 className="min-h-28 rounded-xl bg-neutral-800 p-4"
-                placeholder="مثال: بدلة لينو بقصة واسعة، ياقة V، رابطة جانبية، بدون أزرار ظاهرة، بنطال واسع"
+                placeholder="┘à╪س╪د┘: ╪ذ╪»┘╪ر ┘┘è┘┘ê ╪ذ┘é╪╡╪ر ┘ê╪د╪│╪╣╪ر╪î ┘è╪د┘é╪ر V╪î ╪▒╪د╪ذ╪╖╪ر ╪ش╪د┘╪ذ┘è╪ر╪î ╪ذ╪»┘ê┘ ╪ث╪▓╪▒╪د╪▒ ╪╕╪د┘ç╪▒╪ر╪î ╪ذ┘╪╖╪د┘ ┘ê╪د╪│╪╣"
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 required
@@ -433,33 +433,33 @@ export default function NewProductPage() {
             </label>
 
             <label className="grid gap-2">
-              <span className="text-sm text-neutral-300">العلامات المميزة للـAI *</span>
+              <span className="text-sm text-neutral-300">╪د┘╪╣┘╪د┘à╪د╪ز ╪د┘┘à┘à┘è╪▓╪ر ┘┘┘AI *</span>
               <textarea
                 className="min-h-24 rounded-xl bg-neutral-800 p-4"
-                placeholder="مثال: ياقة V | رابطة جانبية | بدون أزرار | أكمام واسعة | بنطال واسع"
+                placeholder="┘à╪س╪د┘: ┘è╪د┘é╪ر V | ╪▒╪د╪ذ╪╖╪ر ╪ش╪د┘╪ذ┘è╪ر | ╪ذ╪»┘ê┘ ╪ث╪▓╪▒╪د╪▒ | ╪ث┘â┘à╪د┘à ┘ê╪د╪│╪╣╪ر | ╪ذ┘╪╖╪د┘ ┘ê╪د╪│╪╣"
                 value={visualFeatures}
                 onChange={(e) => setVisualFeatures(e.target.value)}
                 required
               />
               <span className="text-xs text-neutral-500">
-                اكتب فقط العلامات البصرية التي تميز التصميم. لا تكرر اللون هنا.
+                ╪د┘â╪ز╪ذ ┘┘é╪╖ ╪د┘╪╣┘╪د┘à╪د╪ز ╪د┘╪ذ╪╡╪▒┘è╪ر ╪د┘╪ز┘è ╪ز┘à┘è╪▓ ╪د┘╪ز╪╡┘à┘è┘à. ┘╪د ╪ز┘â╪▒╪▒ ╪د┘┘┘ê┘ ┘ç┘╪د.
               </span>
             </label>
           </div>
         </section>
 
         <section className="rounded-2xl border border-neutral-800 bg-neutral-900 p-5">
-          <h2 className="mb-4 text-xl font-bold">السعر</h2>
+          <h2 className="mb-4 text-xl font-bold">╪د┘╪│╪╣╪▒</h2>
 
           <div className="grid gap-4 md:grid-cols-2">
             <label className="grid gap-2">
-              <span className="text-sm text-neutral-300">تكلفة القطعة *</span>
+              <span className="text-sm text-neutral-300">╪ز┘â┘┘╪ر ╪د┘┘é╪╖╪╣╪ر *</span>
               <input
                 className="rounded-xl bg-neutral-800 p-4"
                 type="number"
                 min="0"
                 step="0.01"
-                placeholder="تكلفة القطعة"
+                placeholder="╪ز┘â┘┘╪ر ╪د┘┘é╪╖╪╣╪ر"
                 value={costPrice}
                 onChange={(e) => setCostPrice(e.target.value)}
                 required
@@ -467,13 +467,13 @@ export default function NewProductPage() {
             </label>
 
             <label className="grid gap-2">
-              <span className="text-sm text-neutral-300">سعر البيع *</span>
+              <span className="text-sm text-neutral-300">╪│╪╣╪▒ ╪د┘╪ذ┘è╪╣ *</span>
               <input
                 className="rounded-xl bg-neutral-800 p-4"
                 type="number"
                 min="0"
                 step="0.01"
-                placeholder="سعر البيع"
+                placeholder="╪│╪╣╪▒ ╪د┘╪ذ┘è╪╣"
                 value={salePrice}
                 onChange={(e) => setSalePrice(e.target.value)}
                 required
@@ -483,9 +483,9 @@ export default function NewProductPage() {
         </section>
 
         <section className="rounded-2xl border border-neutral-800 bg-neutral-900 p-5">
-          <label className="mb-3 block font-bold">صورة المنتج / اللون *</label>
+          <label className="mb-3 block font-bold">╪╡┘ê╪▒╪ر ╪د┘┘à┘╪ز╪ش / ╪د┘┘┘ê┘ *</label>
           <p className="mb-4 text-sm text-neutral-400">
-            ضع أوضح صورة لهذا اللون. الصورة نفسها ستُستخدم لاحقًا كمرجع بصري للـAI.
+            ╪╢╪╣ ╪ث┘ê╪╢╪ص ╪╡┘ê╪▒╪ر ┘┘ç╪░╪د ╪د┘┘┘ê┘. ╪د┘╪╡┘ê╪▒╪ر ┘┘╪│┘ç╪د ╪│╪ز┘╪│╪ز╪«╪»┘à ┘╪د╪ص┘é┘ï╪د ┘â┘à╪▒╪ش╪╣ ╪ذ╪╡╪▒┘è ┘┘┘AI.
           </p>
 
           <input type="file" accept="image/*" onChange={handleImageChange} required />
@@ -502,14 +502,14 @@ export default function NewProductPage() {
         <section className="rounded-2xl border border-neutral-800 bg-neutral-900 p-5">
           <div className="mb-4 flex items-center justify-between gap-4">
             <div>
-              <h2 className="text-xl font-bold">المقاسات والكميات</h2>
+              <h2 className="text-xl font-bold">╪د┘┘à┘é╪د╪│╪د╪ز ┘ê╪د┘┘â┘à┘è╪د╪ز</h2>
               <p className="mt-1 text-sm text-neutral-400">
-                اكتب الكمية فقط للمقاسات المتوفرة. المقاسات الفارغة لن تُحفظ.
+                ╪د┘â╪ز╪ذ ╪د┘┘â┘à┘è╪ر ┘┘é╪╖ ┘┘┘à┘é╪د╪│╪د╪ز ╪د┘┘à╪ز┘ê┘╪▒╪ر. ╪د┘┘à┘é╪د╪│╪د╪ز ╪د┘┘╪د╪▒╪║╪ر ┘┘ ╪ز┘╪ص┘╪╕.
               </p>
             </div>
 
             <p className="rounded-xl bg-neutral-800 px-4 py-2 text-sm">
-              المقاسات المدخلة: {selectedSizeRows.length}
+              ╪د┘┘à┘é╪د╪│╪د╪ز ╪د┘┘à╪»╪«┘╪ر: {selectedSizeRows.length}
             </p>
           </div>
 
@@ -521,7 +521,7 @@ export default function NewProductPage() {
                   className="w-full rounded-lg bg-neutral-900 p-3"
                   type="number"
                   min="0"
-                  placeholder="الكمية"
+                  placeholder="╪د┘┘â┘à┘è╪ر"
                   value={row.quantity}
                   onChange={(e) => updateSizeQuantity(row.size, e.target.value)}
                 />
@@ -541,7 +541,7 @@ export default function NewProductPage() {
           disabled={saving}
           className="rounded-xl bg-white p-4 font-bold text-black disabled:cursor-not-allowed disabled:opacity-60"
         >
-          {saving ? "جاري الحفظ..." : "حفظ المنتج في المخزون"}
+          {saving ? "╪ش╪د╪▒┘è ╪د┘╪ص┘╪╕..." : "╪ص┘╪╕ ╪د┘┘à┘╪ز╪ش ┘┘è ╪د┘┘à╪«╪▓┘ê┘"}
         </button>
       </form>
     </main>
