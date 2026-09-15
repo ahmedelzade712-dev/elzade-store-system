@@ -4,14 +4,50 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 
 const COLORS = [
-  "أسود", "أبيض", "كحلي", "وردي", "موف", "بيج", "رمادي", "أحمر", "أخضر", "بني",
-  "سماوي", "زيتي", "كيوي", "فسفوري", "بني غامق", "فوشيا", "نود", "برغندي",
-  "أزرق", "بنفسجي", "جيشي", "موف هادي", "كريمي", "بطاطي", "بيبي بلو",
-  "قهوي غامق", "بني محروق", "نيروزي", "برتقالي", "أصفر", "كشميري", "زهري", "عنابي",
+  "أسود",
+  "أبيض",
+  "كحلي",
+  "وردي",
+  "موف",
+  "بيج",
+  "رمادي",
+  "أحمر",
+  "أخضر",
+  "بني",
+  "سماوي",
+  "زيتي",
+  "كيوي",
+  "فسفوري",
+  "بني غامق",
+  "فوشيا",
+  "نود",
+  "برغندي",
+  "أزرق",
+  "بنفسجي",
+  "جيشي",
+  "موف هادي",
+  "كريمي",
+  "بطاطي",
+  "بيبي بلو",
+  "قهوي غامق",
+  "بني محروق",
+  "نيروزي",
+  "برتقالي",
+  "أصفر",
+  "كشميري",
+  "زهري",
+  "عنابي",
 ];
 
 const SIZES = [
-  "XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL",
+  "XS",
+  "S",
+  "M",
+  "L",
+  "XL",
+  "2XL",
+  "3XL",
+  "4XL",
   ...Array.from({ length: 25 }, (_, i) => String(i + 36)),
 ];
 
@@ -20,6 +56,7 @@ const PRODUCT_TYPES = ["بيجامة", "عباية", "بدلة", "حقيبة", "
 export default function NewProductPage() {
   const [stores, setStores] = useState<any[]>([]);
   const [message, setMessage] = useState("");
+  const [saving, setSaving] = useState(false);
 
   const [storeId, setStoreId] = useState("");
   const [sku, setSku] = useState("");
@@ -27,6 +64,7 @@ export default function NewProductPage() {
   const [name, setName] = useState("");
   const [model, setModel] = useState("");
   const [description, setDescription] = useState("");
+  const [visualFeatures, setVisualFeatures] = useState("");
   const [productType, setProductType] = useState("");
   const [color, setColor] = useState("");
   const [costPrice, setCostPrice] = useState("");
@@ -45,10 +83,15 @@ export default function NewProductPage() {
 
   useEffect(() => {
     async function loadStores() {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("stores")
         .select("id, name")
         .order("name");
+
+      if (error) {
+        setMessage("تعذر تحميل المتاجر: " + error.message);
+        return;
+      }
 
       setStores(data || []);
     }
@@ -60,8 +103,18 @@ export default function NewProductPage() {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    if (!file.type.startsWith("image/")) {
+      setMessage("الملف المختار يجب أن يكون صورة");
+      return;
+    }
+
+    if (preview) {
+      URL.revokeObjectURL(preview);
+    }
+
     setImageFile(file);
     setPreview(URL.createObjectURL(file));
+    setMessage("");
   }
 
   function updateSizeQuantity(size: string, quantity: string) {
@@ -76,22 +129,46 @@ export default function NewProductPage() {
     setName("");
     setModel("");
     setDescription("");
+    setVisualFeatures("");
     setProductType("");
     setColor("");
     setCostPrice("");
     setSalePrice("");
     setFabric("");
     setImageFile(null);
+
+    if (preview) {
+      URL.revokeObjectURL(preview);
+    }
+
     setPreview("");
     setSizeRows(SIZES.map((size) => ({ size, quantity: "" })));
   }
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    setMessage("جاري حفظ المنتج...");
 
-    if (!storeId || !designCode.trim() || !name || !productType || !color || !costPrice || !salePrice) {
-      setMessage("يجب تعبئة المتجر، كود التصميم، اسم المنتج، النوع، اللون، التكلفة، وسعر البيع");
+    if (saving) return;
+
+    setMessage("");
+
+    const requiredMissing =
+      !storeId ||
+      !designCode.trim() ||
+      !name.trim() ||
+      !productType ||
+      !color ||
+      !fabric.trim() ||
+      !description.trim() ||
+      !visualFeatures.trim() ||
+      !costPrice ||
+      !salePrice ||
+      !imageFile;
+
+    if (requiredMissing) {
+      setMessage(
+        "يجب تعبئة المتجر، كود التصميم، اسم المنتج، النوع، اللون، الخامة، وصف المنتج، العلامات المميزة للـAI، التكلفة، سعر البيع، وصورة المنتج"
+      );
       return;
     }
 
@@ -100,76 +177,109 @@ export default function NewProductPage() {
       return;
     }
 
-    const finalSku = sku || `PRD-${Date.now()}`;
-    let imageUrl = "";
+    const numericCostPrice = Number(costPrice);
+    const numericSalePrice = Number(salePrice);
 
-    if (imageFile) {
-      const fileExt = imageFile.name.split(".").pop();
-      const fileName = `${Date.now()}-${finalSku}.${fileExt}`;
+    if (
+      !Number.isFinite(numericCostPrice) ||
+      numericCostPrice < 0 ||
+      !Number.isFinite(numericSalePrice) ||
+      numericSalePrice < 0
+    ) {
+      setMessage("التكلفة وسعر البيع يجب أن يكونا أرقامًا صحيحة");
+      return;
+    }
+
+    setSaving(true);
+    setMessage("جاري حفظ المنتج...");
+
+    const finalSku = sku.trim() || `PRD-${Date.now()}`;
+    let imageUrl = "";
+    let uploadedFileName = "";
+    let createdProductId = "";
+
+    try {
+      const fileExt = imageFile.name.split(".").pop()?.toLowerCase() || "jpg";
+      uploadedFileName = `${Date.now()}-${finalSku}.${fileExt}`;
 
       const { error: uploadError } = await supabase.storage
         .from("product-images")
-        .upload(fileName, imageFile);
+        .upload(uploadedFileName, imageFile, {
+          cacheControl: "3600",
+          upsert: false,
+        });
 
       if (uploadError) {
-        setMessage("خطأ في رفع الصورة: " + uploadError.message);
-        return;
+        throw new Error("خطأ في رفع الصورة: " + uploadError.message);
       }
 
-      const { data } = supabase.storage
+      const { data: publicUrlData } = supabase.storage
         .from("product-images")
-        .getPublicUrl(fileName);
+        .getPublicUrl(uploadedFileName);
 
-      imageUrl = data.publicUrl;
-    }
+      imageUrl = publicUrlData.publicUrl;
 
-    const { data: product, error: productError } = await supabase
-      .from("products")
-      .insert({
+      const { data: product, error: productError } = await supabase
+        .from("products")
+        .insert({
+          store_id: storeId,
+          sku: finalSku,
+          design_code: designCode.trim(),
+          name: name.trim(),
+          model: model.trim() || null,
+          description: description.trim(),
+          visual_features: visualFeatures.trim(),
+          product_type: productType,
+          fabric: fabric.trim(),
+          main_image_url: imageUrl,
+          default_cost_price: numericCostPrice,
+          default_sale_price: numericSalePrice,
+          is_active: true,
+        })
+        .select("id")
+        .single();
+
+      if (productError || !product) {
+        throw new Error("خطأ في حفظ المنتج: " + (productError?.message || "خطأ غير معروف"));
+      }
+
+      createdProductId = product.id;
+
+      const variantsToInsert = selectedSizeRows.map((row) => ({
         store_id: storeId,
-        sku: finalSku,
-        design_code: designCode.trim(),
-        name,
-        model: model || null,
-        description: description.trim() || null,
-        product_type: productType,
-        fabric: fabric || null,
-        main_image_url: imageUrl || null,
-        default_cost_price: Number(costPrice),
-        default_sale_price: Number(salePrice),
+        product_id: product.id,
+        color,
+        size: row.size,
+        stock_quantity: Number(row.quantity),
+        cost_price: numericCostPrice,
+        sale_price: numericSalePrice,
+        image_url: imageUrl,
         is_active: true,
-      })
-      .select()
-      .single();
+      }));
 
-    if (productError) {
-      setMessage("خطأ في حفظ المنتج: " + productError.message);
-      return;
+      const { error: variantError } = await supabase
+        .from("product_variants")
+        .insert(variantsToInsert);
+
+      if (variantError) {
+        throw new Error("خطأ في حفظ المقاسات: " + variantError.message);
+      }
+
+      setMessage("تم حفظ المنتج وكل المقاسات في المخزون بنجاح");
+      resetForm();
+    } catch (error: any) {
+      if (createdProductId) {
+        await supabase.from("products").delete().eq("id", createdProductId);
+      }
+
+      if (uploadedFileName) {
+        await supabase.storage.from("product-images").remove([uploadedFileName]);
+      }
+
+      setMessage(error?.message || "حدث خطأ أثناء حفظ المنتج");
+    } finally {
+      setSaving(false);
     }
-
-    const variantsToInsert = selectedSizeRows.map((row) => ({
-      store_id: storeId,
-      product_id: product.id,
-      color,
-      size: row.size,
-      stock_quantity: Number(row.quantity),
-      cost_price: Number(costPrice),
-      sale_price: Number(salePrice),
-      image_url: imageUrl || null,
-      is_active: true,
-    }));
-
-    const { error: variantError } = await supabase
-      .from("product_variants")
-      .insert(variantsToInsert);
-
-    if (variantError) {
-      setMessage("تم حفظ المنتج، لكن حدث خطأ في حفظ المقاسات: " + variantError.message);
-      return;
-    }
-
-    setMessage("تم حفظ المنتج وكل المقاسات في المخزون بنجاح");
-    resetForm();
   }
 
   return (
@@ -178,124 +288,213 @@ export default function NewProductPage() {
         <div>
           <h1 className="text-3xl font-bold">إضافة منتج إلى المخزون</h1>
           <p className="mt-2 text-neutral-400">
-            أدخل المنتج مرة واحدة، ثم أضف كميات المقاسات في نفس الصفحة
+            أدخل بيانات اللون الحالي بدقة. استخدم نفس كود التصميم لكل ألوان نفس التصميم.
           </p>
         </div>
 
-        <a href="/products" className="rounded-xl border border-neutral-700 px-5 py-3">
+        <a
+          href="/products"
+          className="rounded-xl border border-neutral-700 px-5 py-3"
+        >
           عرض المنتجات
         </a>
       </div>
 
       <form onSubmit={handleSubmit} className="grid max-w-6xl grid-cols-1 gap-6">
-        <section className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          <select
-            className="rounded-xl bg-neutral-900 p-4"
-            value={storeId}
-            onChange={(e) => setStoreId(e.target.value)}
-          >
-            <option value="">اختر المتجر</option>
-            {stores.map((store) => (
-              <option key={store.id} value={store.id}>
-                {store.name}
-              </option>
-            ))}
-          </select>
+        <section className="rounded-2xl border border-neutral-800 bg-neutral-900 p-5">
+          <h2 className="mb-4 text-xl font-bold">البيانات الأساسية</h2>
 
-          <input
-            className="rounded-xl bg-neutral-900 p-4"
-            placeholder="كود المنتج اختياري - يضاف تلقائيًا إذا تركته فارغًا"
-            value={sku}
-            onChange={(e) => setSku(e.target.value)}
-          />
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <label className="grid gap-2">
+              <span className="text-sm text-neutral-300">المتجر *</span>
+              <select
+                className="rounded-xl bg-neutral-800 p-4"
+                value={storeId}
+                onChange={(e) => setStoreId(e.target.value)}
+                required
+              >
+                <option value="">اختر المتجر</option>
+                {stores.map((store) => (
+                  <option key={store.id} value={store.id}>
+                    {store.name}
+                  </option>
+                ))}
+              </select>
+            </label>
 
-          <input
-            className="rounded-xl bg-neutral-900 p-4"
-            placeholder="كود التصميم - مثال: ST-001"
-            value={designCode}
-            onChange={(e) => setDesignCode(e.target.value)}
-            required
-          />
+            <label className="grid gap-2">
+              <span className="text-sm text-neutral-300">كود المنتج</span>
+              <input
+                className="rounded-xl bg-neutral-800 p-4"
+                placeholder="اختياري - يضاف تلقائيًا إذا تركته فارغًا"
+                value={sku}
+                onChange={(e) => setSku(e.target.value)}
+              />
+            </label>
 
-          <input
-            className="rounded-xl bg-neutral-900 p-4"
-            placeholder="اسم المنتج مثل: Dior"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-          />
+            <label className="grid gap-2">
+              <span className="text-sm text-neutral-300">كود التصميم *</span>
+              <input
+                className="rounded-xl bg-neutral-800 p-4"
+                placeholder="مثال: LIENE-R-001"
+                value={designCode}
+                onChange={(e) => setDesignCode(e.target.value)}
+                required
+              />
+              <span className="text-xs text-neutral-500">
+                جميع ألوان نفس التصميم يجب أن تحمل نفس الكود.
+              </span>
+            </label>
 
-          <input
-            className="rounded-xl bg-neutral-900 p-4"
-            placeholder="الموديل اختياري مثل: Oversize"
-            value={model}
-            onChange={(e) => setModel(e.target.value)}
-          />
+            <label className="grid gap-2">
+              <span className="text-sm text-neutral-300">اسم المنتج *</span>
+              <input
+                className="rounded-xl bg-neutral-800 p-4"
+                placeholder="مثال: بدلة لينو"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                required
+              />
+            </label>
 
-          <textarea
-            className="min-h-28 rounded-xl bg-neutral-900 p-4 md:col-span-2"
-            placeholder="وصف المنتج - مثال: بدلة لينو رابطة، قصة واسعة، خامة خفيفة..."
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-          />
+            <label className="grid gap-2">
+              <span className="text-sm text-neutral-300">نوع المنتج *</span>
+              <select
+                className="rounded-xl bg-neutral-800 p-4"
+                value={productType}
+                onChange={(e) => setProductType(e.target.value)}
+                required
+              >
+                <option value="">اختر نوع المنتج</option>
+                {PRODUCT_TYPES.map((type) => (
+                  <option key={type} value={type}>
+                    {type}
+                  </option>
+                ))}
+              </select>
+            </label>
 
-          <select
-            className="rounded-xl bg-neutral-900 p-4"
-            value={productType}
-            onChange={(e) => setProductType(e.target.value)}
-          >
-            <option value="">نوع المنتج</option>
-            {PRODUCT_TYPES.map((type) => (
-              <option key={type} value={type}>
-                {type}
-              </option>
-            ))}
-          </select>
+            <label className="grid gap-2">
+              <span className="text-sm text-neutral-300">الموديل / القصة</span>
+              <input
+                className="rounded-xl bg-neutral-800 p-4"
+                placeholder="اختياري - مثال: Oversize"
+                value={model}
+                onChange={(e) => setModel(e.target.value)}
+              />
+            </label>
 
-          <select
-            className="rounded-xl bg-neutral-900 p-4"
-            value={color}
-            onChange={(e) => setColor(e.target.value)}
-          >
-            <option value="">اختر اللون</option>
-            {COLORS.map((c) => (
-              <option key={c} value={c}>
-                {c}
-              </option>
-            ))}
-          </select>
+            <label className="grid gap-2">
+              <span className="text-sm text-neutral-300">الخامة *</span>
+              <input
+                className="rounded-xl bg-neutral-800 p-4"
+                placeholder="مثال: لينو / ستان / قطن"
+                value={fabric}
+                onChange={(e) => setFabric(e.target.value)}
+                required
+              />
+            </label>
 
-          <input
-            className="rounded-xl bg-neutral-900 p-4"
-            type="number"
-            placeholder="تكلفة القطعة"
-            value={costPrice}
-            onChange={(e) => setCostPrice(e.target.value)}
-          />
-
-          <input
-            className="rounded-xl bg-neutral-900 p-4"
-            type="number"
-            placeholder="سعر البيع"
-            value={salePrice}
-            onChange={(e) => setSalePrice(e.target.value)}
-          />
-
-          <input
-            className="rounded-xl bg-neutral-900 p-4 md:col-span-2"
-            placeholder="الخامة اختياري"
-            value={fabric}
-            onChange={(e) => setFabric(e.target.value)}
-          />
+            <label className="grid gap-2">
+              <span className="text-sm text-neutral-300">اللون *</span>
+              <select
+                className="rounded-xl bg-neutral-800 p-4"
+                value={color}
+                onChange={(e) => setColor(e.target.value)}
+                required
+              >
+                <option value="">اختر اللون</option>
+                {COLORS.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
         </section>
 
         <section className="rounded-2xl border border-neutral-800 bg-neutral-900 p-5">
-          <label className="mb-3 block text-neutral-300">صورة المنتج / اللون</label>
-          <input type="file" accept="image/*" onChange={handleImageChange} />
+          <h2 className="mb-2 text-xl font-bold">بيانات تساعد الـAI على فهم التصميم</h2>
+          <p className="mb-4 text-sm text-neutral-400">
+            الصورة هي المرجع الأساسي. هذه الحقول تساعد الـAI عند وجود تصميمات متشابهة.
+          </p>
+
+          <div className="grid gap-4">
+            <label className="grid gap-2">
+              <span className="text-sm text-neutral-300">وصف المنتج *</span>
+              <textarea
+                className="min-h-28 rounded-xl bg-neutral-800 p-4"
+                placeholder="مثال: بدلة لينو بقصة واسعة، ياقة V، رابطة جانبية، بدون أزرار ظاهرة، بنطال واسع"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                required
+              />
+            </label>
+
+            <label className="grid gap-2">
+              <span className="text-sm text-neutral-300">العلامات المميزة للـAI *</span>
+              <textarea
+                className="min-h-24 rounded-xl bg-neutral-800 p-4"
+                placeholder="مثال: ياقة V | رابطة جانبية | بدون أزرار | أكمام واسعة | بنطال واسع"
+                value={visualFeatures}
+                onChange={(e) => setVisualFeatures(e.target.value)}
+                required
+              />
+              <span className="text-xs text-neutral-500">
+                اكتب فقط العلامات البصرية التي تميز التصميم. لا تكرر اللون هنا.
+              </span>
+            </label>
+          </div>
+        </section>
+
+        <section className="rounded-2xl border border-neutral-800 bg-neutral-900 p-5">
+          <h2 className="mb-4 text-xl font-bold">السعر</h2>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <label className="grid gap-2">
+              <span className="text-sm text-neutral-300">تكلفة القطعة *</span>
+              <input
+                className="rounded-xl bg-neutral-800 p-4"
+                type="number"
+                min="0"
+                step="0.01"
+                placeholder="تكلفة القطعة"
+                value={costPrice}
+                onChange={(e) => setCostPrice(e.target.value)}
+                required
+              />
+            </label>
+
+            <label className="grid gap-2">
+              <span className="text-sm text-neutral-300">سعر البيع *</span>
+              <input
+                className="rounded-xl bg-neutral-800 p-4"
+                type="number"
+                min="0"
+                step="0.01"
+                placeholder="سعر البيع"
+                value={salePrice}
+                onChange={(e) => setSalePrice(e.target.value)}
+                required
+              />
+            </label>
+          </div>
+        </section>
+
+        <section className="rounded-2xl border border-neutral-800 bg-neutral-900 p-5">
+          <label className="mb-3 block font-bold">صورة المنتج / اللون *</label>
+          <p className="mb-4 text-sm text-neutral-400">
+            ضع أوضح صورة لهذا اللون. الصورة نفسها ستُستخدم لاحقًا كمرجع بصري للـAI.
+          </p>
+
+          <input type="file" accept="image/*" onChange={handleImageChange} required />
+
           {preview && (
             <img
               src={preview}
               alt="Preview"
-              className="mt-4 h-56 w-56 rounded-xl object-cover"
+              className="mt-4 h-64 w-64 rounded-xl object-cover"
             />
           )}
         </section>
@@ -331,10 +530,18 @@ export default function NewProductPage() {
           </div>
         </section>
 
-        {message && <p className="text-yellow-400">{message}</p>}
+        {message && (
+          <div className="rounded-xl border border-yellow-700 bg-yellow-950/30 p-4 text-yellow-300">
+            {message}
+          </div>
+        )}
 
-        <button className="rounded-xl bg-white p-4 font-bold text-black">
-          حفظ المنتج في المخزون
+        <button
+          type="submit"
+          disabled={saving}
+          className="rounded-xl bg-white p-4 font-bold text-black disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {saving ? "جاري الحفظ..." : "حفظ المنتج في المخزون"}
         </button>
       </form>
     </main>
