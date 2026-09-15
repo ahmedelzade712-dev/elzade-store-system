@@ -82,6 +82,7 @@ export default function ProductsPage() {
   const [editName, setEditName] = useState("");
   const [editModel, setEditModel] = useState("");
   const [editDescription, setEditDescription] = useState("");
+  const [editVisualFeatures, setEditVisualFeatures] = useState("");
   const [editType, setEditType] = useState("");
   const [editColor, setEditColor] = useState("");
   const [editFabric, setEditFabric] = useState("");
@@ -130,6 +131,7 @@ export default function ProductsPage() {
           name,
           model,
           description,
+          visual_features,
           product_type,
           fabric,
           main_image_url
@@ -197,6 +199,7 @@ export default function ProductsPage() {
         ${item.product?.name || ""}
         ${item.product?.model || ""}
         ${item.product?.description || ""}
+        ${item.product?.visual_features || ""}
         ${item.product?.product_type || ""}
         ${item.color || ""}
         ${item.store?.name || ""}
@@ -281,6 +284,7 @@ export default function ProductsPage() {
     setEditName(item.product?.name || "");
     setEditModel(item.product?.model || "");
     setEditDescription(item.product?.description || "");
+    setEditVisualFeatures(item.product?.visual_features || "");
     setEditType(item.product?.product_type || "");
     setEditColor(item.color || "");
     setEditFabric(item.product?.fabric || "");
@@ -463,13 +467,15 @@ export default function ProductsPage() {
       !editStoreId ||
       !editDesignCode.trim() ||
       !editName.trim() ||
+      !editDescription.trim() ||
+      !editVisualFeatures.trim() ||
       !editType ||
       !editColor ||
       !editCostPrice ||
       !editSalePrice
     ) {
       setMessage(
-        "يجب تعبئة المتجر، كود التصميم، الاسم، النوع، اللون، التكلفة، وسعر البيع"
+        "يجب تعبئة المتجر، كود التصميم، الاسم، وصف المنتج، العلامات المميزة للـAI، النوع، اللون، التكلفة، وسعر البيع"
       );
       return;
     }
@@ -510,7 +516,8 @@ export default function ProductsPage() {
           design_code: editDesignCode.trim(),
           name: editName.trim(),
           model: editModel.trim() || null,
-          description: editDescription.trim() || null,
+          description: editDescription.trim(),
+          visual_features: editVisualFeatures.trim(),
           product_type: editType,
           fabric: editFabric.trim() || null,
           main_image_url: finalImageUrl || null,
@@ -555,7 +562,7 @@ export default function ProductsPage() {
       // Verify the exact fields the user edited actually persisted.
       const { data: verifyProduct, error: verifyError } = await supabase
         .from("products")
-        .select("id, design_code, description, name, model, product_type, fabric")
+        .select("id, design_code, description, visual_features, name, model, product_type, fabric")
         .eq("id", editItem.product_id)
         .single();
 
@@ -568,10 +575,11 @@ export default function ProductsPage() {
 
       if (
         String(verifyProduct.design_code || "") !== editDesignCode.trim() ||
-        String(verifyProduct.description || "") !== editDescription.trim()
+        String(verifyProduct.description || "") !== editDescription.trim() ||
+        String(verifyProduct.visual_features || "") !== editVisualFeatures.trim()
       ) {
         throw new Error(
-          "لم يتم حفظ كود التصميم أو وصف المنتج كما هو مكتوب. أعد المحاولة."
+          "لم يتم حفظ كود التصميم أو وصف المنتج أو العلامات المميزة للـAI كما هو مكتوب. أعد المحاولة."
         );
       }
 
@@ -1016,12 +1024,38 @@ export default function ProductsPage() {
                 onChange={(e) => setEditFabric(e.target.value)}
               />
 
-              <textarea
-                className="min-h-28 rounded-xl bg-neutral-800 p-4 md:col-span-2"
-                placeholder="وصف المنتج"
-                value={editDescription}
-                onChange={(e) => setEditDescription(e.target.value)}
-              />
+            </div>
+
+            <div className="mt-5 rounded-2xl border border-neutral-800 bg-neutral-950 p-5">
+              <h3 className="mb-2 text-xl font-bold">بيانات تساعد الـAI على فهم التصميم</h3>
+              <p className="mb-4 text-sm text-neutral-400">
+                نفس الحقول الموجودة في صفحة إضافة منتج جديد.
+              </p>
+
+              <div className="grid gap-4">
+                <label className="grid gap-2">
+                  <span className="text-sm text-neutral-300">وصف المنتج *</span>
+                  <textarea
+                    className="min-h-28 rounded-xl bg-neutral-800 p-4"
+                    placeholder="مثال: بدلة لينو بقصة واسعة، ياقة V، رابطة جانبية، بدون أزرار ظاهرة، بنطال واسع"
+                    value={editDescription}
+                    onChange={(e) => setEditDescription(e.target.value)}
+                  />
+                </label>
+
+                <label className="grid gap-2">
+                  <span className="text-sm text-neutral-300">العلامات المميزة للـAI *</span>
+                  <textarea
+                    className="min-h-24 rounded-xl bg-neutral-800 p-4"
+                    placeholder="مثال: ياقة V | رابطة جانبية | بدون أزرار | أكمام واسعة | بنطال واسع"
+                    value={editVisualFeatures}
+                    onChange={(e) => setEditVisualFeatures(e.target.value)}
+                  />
+                  <span className="text-xs text-neutral-500">
+                    اكتب فقط العلامات البصرية التي تميز التصميم. لا تكرر اللون هنا.
+                  </span>
+                </label>
+              </div>
             </div>
 
             <div className="mt-5 rounded-2xl border border-neutral-800 bg-neutral-950 p-5">
