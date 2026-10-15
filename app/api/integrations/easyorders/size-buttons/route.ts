@@ -154,12 +154,26 @@ async function operation(request: Request, apply: boolean) {
       return respond({ ok: false, message: "نوع المقاس أو بيانات المقاسات غير متوقعة. لم يُجرَ أي تعديل." }, 422);
     }
 
-    // PATCH only variation group metadata. Preserve its IDs and prop IDs and
-    // do NOT include images, description, price, SKU, stock or product variants.
-    const variations = before.groups.map(v => {
-      if (sval(v.name) !== "المقاس") return v;
-      return { ...v, type: "buttons" };
-    });
+    // Restrict the payload to the documented variation and prop fields.
+    // Never echo read-only attributes from the GET response, and never send
+    // price, quantity, images, descriptions, stock variants, or SKU.
+    const variations = before.groups.map(v => ({
+      id: sval(v.id),
+      name: sval(v.name),
+      product_id: sval(v.product_id) || before.id,
+      type: sval(v.name) === "المقاس" ? "buttons" : sval(v.type),
+      props: (Array.isArray(v.props) ? v.props.map(object) : []).map(p => ({
+        id: sval(p.id),
+        name: sval(p.name),
+        variation_id: sval(p.variation_id) || sval(v.id),
+        value: sval(p.value) || sval(p.name),
+      })),
+    }));
+    if (variations.some(v => !v.id || !v.name || !v.type ||
+      v.props.some(p => !p.id || !p.name || !p.value))) {
+      return respond({ ok: false, status: "invalid_remote_variations",
+        message: "حقول خيارات المقاس غير مكتملة؛ لم نرسل أي تعديل." }, 422);
+    }
 
     const res = await fetch(API + "/" + encodeURIComponent(before.id), {
       method: "PATCH",
@@ -174,9 +188,23 @@ async function operation(request: Request, apply: boolean) {
     });
 
     if (!res.ok) {
+      // Report status and validation field names, not complete response bodies
+      // (which can include private catalog data and must stay server-side).
+      const rawError: unknown = await res.json().catch(() => null);
+      const responseBody = object(rawError);
+      const validationFields = Object.keys(object(responseBody.errors))
+        .filter(k => /^[a-zA-Z0-9_.\\[\\]-]{1,100}$/.test(k)).slice(0, 12);
+      const message = res.status === 401 || res.status === 403
+        ? "مفتاح EasyOrders قد يفتقد صلاحية products:update. تحقق من صلاحياته."
+        : res.status === 422 || res.status === 400
+          ? "رفض EasyOrders صيغة تعديل المقاسات. راجع الحقول التي ذكرها API."
+          : res.status === 405
+            ? "طريقة تحديث المنتج غير مقبولة من EasyOrders."
+            : "رفض EasyOrders تعديل شكل المقاسات.";
       return respond({
-        ok: false, status: "api_rejected", http_status: res.status,
-        message: "رفض EasyOrders التعديل. لم نُرسل أي حقول للأسعار أو المخزون أو الصور.",
+        ok: false, status: "api_rejected",
+        http_status: res.status, validation_fields: validationFields,
+        message: message + " لم نرسل حقولًا للأسعار أو المخزون أو الصور.",
       }, 422);
     }
 
