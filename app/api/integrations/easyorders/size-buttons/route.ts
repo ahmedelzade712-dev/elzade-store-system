@@ -251,4 +251,15 @@ async function operation(request: Request, apply: boolean) {
 }
 
 export async function GET(request: Request) { return operation(request, false); }
-export async function POST(request: Request) { return operation(request, true); }
+/**
+ * Keep this endpoint read-only until the full EasyOrders update contract has
+ * been verified. PATCH with only variations returned HTTP 400 twice; sending
+ * a guessed full-body update could overwrite product data.
+ */
+export async function POST(_request: Request) {
+  return respond({
+    ok: false,
+    status: "manual_update_required",
+    message: "أوقفنا تحديث المقاسات عبر API مؤقتًا بعد رفض EasyOrders الطلب. غيّر طريقة عرض المقاس من لوحة EasyOrders، ثم استخدم زر الفحص للتأكد. لم نرسل أي تعديل جديد.",
+  }, 409);
+}
