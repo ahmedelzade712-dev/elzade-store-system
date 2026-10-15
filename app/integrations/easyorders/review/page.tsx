@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
+import { titleOnly, restoreTitleDrafts, approvedTitlePayload, type TitleDraft as Draft } from "@/lib/integrations/easyorders/title-review";
 
 type Variant = { variant_id: string; size: string | null; quantity: number | null; active: boolean };
 type Product = {
@@ -22,11 +23,11 @@ type Catalog = {
   summary?: { erp_products: number; erp_variants: number; ready: number };
   products?: Product[];
 };
-type Draft = { title: string; color_name: string; description: string; visible_details: string[] };
 type SavedDraft = Draft & { image_url: string; approved: boolean; updated_at: string };
 type DraftMap = Record<string, SavedDraft>;
 
-const SAVED_KEY = "adora-easyorders-title-reviews-v1";
+const SAVED_KEY = "adora-easyorders-title-reviews-v2";
+const LEGACY_KEY = "adora-easyorders-title-reviews-v1";
 
 function errorMessage(value: unknown): string {
   return value instanceof Error ? value.message : "تعذر إكمال الطلب. حاول مجددًا.";
@@ -50,9 +51,10 @@ export default function AdoraProductReviewPage() {
 
   useEffect(() => {
     try {
-      const stored = window.localStorage.getItem(SAVED_KEY);
+      const current = window.localStorage.getItem(SAVED_KEY);
+      const stored = current ?? window.localStorage.getItem(LEGACY_KEY);
       if (stored) {
-        const parsed = JSON.parse(stored) as DraftMap;
+        const parsed = restoreTitleDrafts(JSON.parse(stored), current === null);
         draftRef.current = parsed;
         setDrafts(parsed);
       }
@@ -152,17 +154,14 @@ export default function AdoraProductReviewPage() {
         throw new Error(result.message || "لم يتم توليد الاسم.");
       }
 
-      const proposed = result.draft;
+      const proposed = titleOnly(result.draft);
       storeDraft(product.product_id, {
         title: proposed.title,
-        color_name: proposed.color_name,
-        description: proposed.description,
-        visible_details: proposed.visible_details,
         image_url: product.image_url || "",
         approved: false,
         updated_at: new Date().toISOString(),
       });
-      if (!fromBatch) setNotice("تم تحليل الصورة. راجع الاسم والوصف ثم اضغط موافقة.");
+      if (!fromBatch) setNotice("تم تحليل الصورة. راجع الاسم التجاري ثم اضغط موافقة.");
       return true;
     } catch (error) {
       setNotice("المنتج " + product.sku + ": " + errorMessage(error));
@@ -194,12 +193,12 @@ export default function AdoraProductReviewPage() {
     setNotice("تم إنشاء " + completed + " اقتراحًا. بقيت جميع الاقتراحات بانتظار موافقتك.");
   }
 
-  function edit(product: Product, field: "title" | "color_name" | "description", value: string) {
+  function edit(product: Product, value: string) {
     const current = draftRef.current[product.product_id];
     if (!current || current.image_url !== product.image_url) return;
     storeDraft(product.product_id, {
       ...current,
-      [field]: value,
+      title: value,
       approved: false,
       updated_at: new Date().toISOString(),
     });
@@ -208,7 +207,7 @@ export default function AdoraProductReviewPage() {
   function approve(product: Product) {
     const current = draftRef.current[product.product_id];
     if (!current || current.image_url !== product.image_url ||
-      !current.title.trim() || !current.color_name.trim() || !current.description.trim()) return;
+      !current.title.trim()) return;
 
     storeDraft(product.product_id, {
       ...current, approved: true, updated_at: new Date().toISOString(),
@@ -224,17 +223,7 @@ export default function AdoraProductReviewPage() {
     const selected = catalog.flatMap(p => {
       const draft = draftRef.current[p.product_id];
       if (!draft || !draft.approved || draft.image_url !== p.image_url) return [];
-      return [{
-        erp_product_id: p.product_id,
-        sku: p.sku,
-        display_title: draft.title,
-        display_color: draft.color_name,
-        display_description: draft.description,
-        approved_at: draft.updated_at,
-        source_image_url: p.image_url,
-        quantity_by_variant: p.sizes,
-        sale_price_snapshot: p.price,
-      }];
+      return [approvedTitlePayload(p.product_id, draft)];
     });
     if (selected.length === 0) {
       setNotice("لا توجد أسماء معتمدة لتصديرها.");
@@ -242,7 +231,7 @@ export default function AdoraProductReviewPage() {
     }
     const blob = new Blob([JSON.stringify({
       store: "Adora",
-      kind: "preview_only_approved_product_copy",
+      kind: "preview_only_approved_product_title",
       approved_products: selected,
     }, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
@@ -269,8 +258,8 @@ export default function AdoraProductReviewPage() {
           </a>
           <h1 className="text-2xl font-bold sm:text-3xl">مراجعة أسماء منتجات Adora</h1>
           <p className="leading-7 text-neutral-300">
-            يحلل الذكاء الاصطناعي الصورة الرئيسية لكل منتج، ويقترح الاسم ودرجة اللون والوصف.
-            يمكنك تعديلها ثم اعتمادها. لا يغيّر النظام أسماء ERP ولا ينشر المنتجات في EasyOrders في هذه المرحلة.
+            يحلل الذكاء الاصطناعي الصورة الرئيسية لكل منتج، ويقترح الاسم التجاري فقط.
+            يمكنك تعديل الاسم ثم اعتماده. يبقى وصف المنتج واللون دون تغيير. لا يغيّر النظام أسماء ERP ولا ينشر المنتجات في EasyOrders في هذه المرحلة.
           </p>
           <p className="text-sm text-amber-300">
             المسودات والموافقات محفوظة مؤقتًا داخل هذا المتصفح فقط. استخدم «تصدير المعتمد»
@@ -341,22 +330,10 @@ export default function AdoraProductReviewPage() {
                   {draft ? <>
                     <label className="block text-sm">
                       الاسم التجاري
-                      <input dir="rtl" value={draft.title} onChange={e => edit(product, "title", e.target.value)}
+                      <input dir="rtl" value={draft.title} onChange={e => edit(product, e.target.value)}
                         className="mt-1 w-full rounded-lg border border-neutral-700 bg-neutral-800 p-3 text-white" />
                     </label>
-                    <label className="block text-sm">
-                      درجة اللون التسويقية
-                      <input dir="rtl" value={draft.color_name} onChange={e => edit(product, "color_name", e.target.value)}
-                        className="mt-1 w-full rounded-lg border border-neutral-700 bg-neutral-800 p-3 text-white" />
-                    </label>
-                    <label className="block text-sm">
-                      وصف المنتج
-                      <textarea rows={3} dir="rtl" value={draft.description}
-                        onChange={e => edit(product, "description", e.target.value)}
-                        className="mt-1 w-full rounded-lg border border-neutral-700 bg-neutral-800 p-3 text-white" />
-                    </label>
-                    <p className="text-xs text-neutral-400">تفاصيل رأتها AI: {draft.visible_details.join("، ") || "لم تُذكر"}</p>
-                  </> : <p className="text-sm text-neutral-400">اضغط تحليل الصورة لاقتراح اسم ووصف بناءً على صورة المنتج نفسها.</p>}
+                  </> : <p className="text-sm text-neutral-400">اضغط تحليل الصورة لاقتراح الاسم التجاري فقط بناءً على صورة المنتج نفسها.</p>}
                   <div className="flex flex-wrap gap-2">
                     <button type="button" disabled={!product.ready || runningAll || busyProductId !== null}
                       onClick={() => generate(product)}
@@ -366,7 +343,7 @@ export default function AdoraProductReviewPage() {
                     {draft && !draft.approved && <button type="button"
                       onClick={() => approve(product)}
                       className="rounded-lg bg-green-600 px-4 py-2 text-sm font-semibold">
-                      موافقة على الاسم والوصف
+                      موافقة على الاسم التجاري
                     </button>}
                     {draft?.approved && <button type="button"
                       onClick={() => revoke(product)}

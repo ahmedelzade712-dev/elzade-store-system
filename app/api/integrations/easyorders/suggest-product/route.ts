@@ -1,6 +1,7 @@
 import OpenAI from "openai";
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { parseTitleDraft } from "@/lib/integrations/easyorders/title-review";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -32,26 +33,8 @@ async function requireAdmin(request: Request): Promise<boolean> {
   return !profileError && profile?.is_active === true && profile?.role === "admin";
 }
 
-type Draft = { title: string; color_name: string; description: string; visible_details: string[] };
-
-function parseDraft(raw: string): Draft {
-  const clean = raw.trim().replace(/^\x60\x60\x60(?:json)?\s*/i, "").replace(/\s*\x60\x60\x60$/, "");
-  const data = JSON.parse(clean) as Record<string, unknown>;
-  const title = typeof data.title === "string" ? data.title.trim() : "";
-  const color_name = typeof data.color_name === "string" ? data.color_name.trim() : "";
-  const description = typeof data.description === "string" ? data.description.trim() : "";
-  const visible_details = Array.isArray(data.visible_details)
-    ? data.visible_details.filter((x): x is string => typeof x === "string").slice(0, 6)
-    : [];
-
-  if (!title || !color_name || !description || title.length > 120 || color_name.length > 50 || description.length > 750) {
-    throw new Error("Model returned an invalid title, color or description");
-  }
-  return { title, color_name, description, visible_details };
-}
-
 /**
- * Admin-only Preview endpoint: generate a storefront copy suggestion based on
+ * Admin-only Preview endpoint: generate a storefront title suggestion based on
  * the ERP product's photo. No DB writes or EasyOrders write requests.
  */
 export async function POST(request: Request) {
@@ -114,17 +97,17 @@ export async function POST(request: Request) {
     }
 
     const prompt = [
-      "أنت محرر كتالوج متجر Adora للبيجامات النسائية. شاهد الصورة المحددة بعناية واكتب اسمًا ووصفًا عربيين للمتجر.",
+      "أنت محرر كتالوج متجر Adora للبيجامات النسائية. شاهد الصورة المحددة بعناية واقترح الاسم التجاري العربي فقط للمتجر.",
       "القواعد الملزمة:",
       "1. الاسم التجاري: بيجامة ستان + النقشة أو السمة المرئية الواضحة (إن ظهرت) + درجة اللون، مفصول بشرطة طويلة. مثال شكلي: بيجامة ستان بنقشة قلوب – وردي بودري.",
       "2. درجة اللون يجب أن تكون أنيقة ولكن واقعية ومطابقة للصورة. لون ERP الأساسي: " + colors[0] + ".",
-      "3. لا تخترع رسومات أو أزرارًا أو خامات أو تفاصيل لا تراها. إذا الصورة غير واضحة قلل الوصف ولا تتكهن.",
+      "3. لا تخترع رسومات أو أزرارًا أو خامات أو تفاصيل لا تراها. إذا الصورة غير واضحة اختر اسمًا عامًا ولا تتكهن.",
       "4. الخامة المسجلة: " + String(product.fabric || "ستان بوليستر") + ". لا تقل حرير طبيعي ولا تعد بفوائد غير مؤكدة.",
       "5. تجاهل أي خلفية أو أكسسوارات أو حقائب؛ ركّز على الملابس.",
       "6. لا تذكر أسماء علامات تجارية أو مصممين أو تشير إلى أصالة علامة، حتى إن كانت مطبوعة على القماش.",
       "7. لا تغير أسماء ERP الداخلية، ولا تستخدمها لصناعة الاسم. لا تضف الأسعار أو المقاسات أو المخزون أو عروضًا ترويجية.",
-      "8. الوصف جملتان قصيرتان، أنيقتان وواقعيتان بدون تفاصيل مفترضة.",
-      "9. أعد JSON صالحًا فقط بالمفاتيح: title، color_name، description، visible_details (مصفوفة قصيرة بما رأيته فعلًا).",
+      "8. لا تكتب أو تعدل وصف المنتج أو اللون التسويقي أو أي حقل آخر؛ استخدم اللون المرئي كسياق للاسم فقط.",
+      "9. أعد JSON صالحًا بمفتاح واحد فقط: title (الاسم التجاري).",
     ].join("\n");
 
     const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -141,12 +124,12 @@ export async function POST(request: Request) {
       max_output_tokens: 500,
     });
 
-    const draft = parseDraft(response.output_text || "");
+    const draft = parseTitleDraft(response.output_text || "");
     return reply({
       ok: true,
       product_id: id,
       draft,
-      message: "الاسم والوصف مقترحان للمراجعة فقط. لم يتم نشر أي بيانات.",
+      message: "الاسم التجاري مقترح للمراجعة فقط. لم يتم نشر أي بيانات.",
     });
   } catch (error) {
     console.error("EasyOrders product suggestion:", error instanceof Error ? error.message : "unexpected error");
