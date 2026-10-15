@@ -16,7 +16,7 @@ export default function Appearance(){
   finally{setBusy(false)}
  }
  return <main dir="rtl" className="min-h-screen bg-neutral-950 p-8 text-white"><section className="mx-auto max-w-xl space-y-5">
- <h1 className="text-2xl font-bold">تعديل المقاسات إلى أزرار</h1><p>المنتج الأحمر فقط. لا تغيير للأسعار أو الصور أو المخزون.</p>
+ <h1 className="text-2xl font-bold">فحص عرض المقاسات في EasyOrders</h1><p>فحص المنتج الأحمر فقط. الصفحة قراءة فقط ولا تنفذ تعديلات على الأسعار أو الصور أو المخزون.</p>
  {!ready?<form className="space-y-3" onSubmit={async e=>{e.preventDefault();setBusy(true);const x=await supabase.auth.signInWithPassword({email:email.trim(),password});setBusy(false);if(x.error)setResult({ok:false,message:"تعذر تسجيل الدخول"});else{setReady(true);setPassword("")}}}>
  <input type="email" aria-label="البريد الإلكتروني" placeholder="بريد مدير ERP" required dir="ltr" value={email} onChange={e=>setEmail(e.target.value)} className="block w-full rounded bg-neutral-800 p-3"/>
  <input type="password" aria-label="كلمة المرور" placeholder="كلمة المرور" required dir="ltr" value={password} onChange={e=>setPassword(e.target.value)} className="block w-full rounded bg-neutral-800 p-3"/>
@@ -28,7 +28,10 @@ export default function Appearance(){
  {result.validation_fields?.length?<p>حقول تحتاج مراجعة: {result.validation_fields.join("، ")}</p>:null}
  {result.summary&&<p>{result.summary.name} — {result.summary.variation_type} — {result.summary.sizes.join(" | ")}</p>}
  </div>}
- {result?.ok&&result.status==="ready"&&<button disabled={busy} className="rounded bg-green-600 p-3" onClick={()=>{if(window.confirm("تغيير عرض المقاسات إلى أزرار؟"))void execute(true)}}>تحويل المقاسات إلى أزرار</button>}
+ {result?.ok&&result.status==="ready"&&<div className="space-y-2 rounded border border-amber-600 p-3 text-sm">
+ <p>تم التحقق من المقاسات، لكن تعديل عرضها عبر API موقوف مؤقتًا بعد رفض EasyOrders الطلب برمز 400.</p>
+ <p>لتغيير طريقة العرض دون المساس بالمخزون أو الصور: افتح منتج Adora الأحمر من لوحة إدارة EasyOrders، ثم راجع خيار «المقاس» واختر «أزرار / Buttons» بدل «قائمة / Dropdown» إذا كان هذا الخيار متاحًا. احفظ، ثم استخدم زر الفحص أعلاه للتأكد.</p>
+ </div>}
  {result?.status==="updated_verified"&&<a className="underline" href="https://adora.ly/products/adora-ce8563f5-d387-449e-908a-1533be81322d">فتح المنتج</a>}
  </section></main>
 }
