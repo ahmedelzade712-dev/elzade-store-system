@@ -108,6 +108,16 @@ function details(p: R) {
     sizeCount: sizes.length,
     variantCount: variants.length,
     images: Array.isArray(p.images) ? p.images.length : 0,
+    protectedSnapshot: JSON.stringify({
+      name: p.name, sku: p.sku, taager_code: p.taager_code, slug: p.slug,
+      price: p.price, sale_price: p.sale_price, description: p.description,
+      thumb: p.thumb, images: p.images, quantity: p.quantity,
+      track_stock: p.track_stock, disable_orders_for_no_stock: p.disable_orders_for_no_stock,
+      variants: variants.map(v => ({
+        id: v.id, price: v.price, sale_price: v.sale_price, quantity: v.quantity,
+        taager_code: v.taager_code, variation_props: v.variation_props,
+      })),
+    }),
     groups, size, variants,
   };
 }
@@ -212,7 +222,8 @@ async function operation(request: Request, apply: boolean) {
     if (after.variationType !== "buttons" ||
         after.variantCount !== before.variantCount ||
         after.sizeCount !== before.sizeCount ||
-        after.images !== before.images) {
+        after.images !== before.images ||
+        after.protectedSnapshot !== before.protectedSnapshot) {
       return respond({
         ok: false, status: "review_required",
         message: "استجاب EasyOrders لكن نتيجة قراءة المقاسات أو الصور تحتاج مراجعة قبل أي خطوة أخرى.",
@@ -228,7 +239,7 @@ async function operation(request: Request, apply: boolean) {
 
     return respond({
       ok: true, status: "updated_verified",
-      message: "تم تحويل المقاسات إلى أزرار والتحقق من بقاء عدد المقاسات والصور.",
+      message: "تم تحويل المقاسات إلى أزرار والتحقق من ثبات المقاسات والصور والسعر والمخزون والوصف.",
       summary: { ...summary, variation_type: "buttons" },
     });
   } catch (error) {
