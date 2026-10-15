@@ -1,7 +1,7 @@
 "use client";
 import {useEffect,useState} from "react";
 import {supabase} from "@/lib/supabase";
-type Result={ok:boolean;status?:string;message?:string;summary?:{name:string;sizes:string[];variation_type:string;variant_count:number;image_count:number}};
+type Result={ok:boolean;status?:string;message?:string;summary?:{name:string;sizes:string[];variation_type:string;variant_count:number;image_count:number};http_status?:number;validation_fields?:string[]};
 export default function Appearance(){
  const [ready,setReady]=useState(false),[busy,setBusy]=useState(false),[result,setResult]=useState<Result|null>(null),[email,setEmail]=useState(""),[password,setPassword]=useState("");
  useEffect(()=>{supabase.auth.getUser().then(x=>setReady(Boolean(x.data.user))).catch(()=>setReady(false))},[]);
@@ -22,7 +22,12 @@ export default function Appearance(){
  <input type="password" aria-label="كلمة المرور" placeholder="كلمة المرور" required dir="ltr" value={password} onChange={e=>setPassword(e.target.value)} className="block w-full rounded bg-neutral-800 p-3"/>
  <button disabled={busy} className="rounded bg-white p-3 text-black">تسجيل الدخول</button>
  </form>:<button disabled={busy} className="rounded bg-white p-3 text-black" onClick={()=>execute(false)}>فحص المقاسات</button>}
- {result&&<div className="space-y-2 border p-4"><p>{result.message}</p>{result.summary&&<p>{result.summary.name} — {result.summary.variation_type} — {result.summary.sizes.join(" | ")}</p>}</div>}
+ {result&&<div className="space-y-2 border p-4">
+ <p>{result.message}</p>
+ {result.http_status&&<p>رمز استجابة EasyOrders: {result.http_status}</p>}
+ {result.validation_fields?.length?<p>حقول تحتاج مراجعة: {result.validation_fields.join("، ")}</p>:null}
+ {result.summary&&<p>{result.summary.name} — {result.summary.variation_type} — {result.summary.sizes.join(" | ")}</p>}
+ </div>}
  {result?.ok&&result.status==="ready"&&<button disabled={busy} className="rounded bg-green-600 p-3" onClick={()=>{if(window.confirm("تغيير عرض المقاسات إلى أزرار؟"))void execute(true)}}>تحويل المقاسات إلى أزرار</button>}
  {result?.status==="updated_verified"&&<a className="underline" href="https://adora.ly/products/adora-ce8563f5-d387-449e-908a-1533be81322d">فتح المنتج</a>}
  </section></main>
