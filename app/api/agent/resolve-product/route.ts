@@ -3,10 +3,6 @@ import OpenAI from "openai";
 
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
-
 type CatalogRow = {
   product_id: string;
   store_id: string;
@@ -580,6 +576,9 @@ ambiguous=true
         detail: "high",
       });
     }
+
+    // Instantiate only at request time so Preview builds do not require OpenAI credentials.
+    const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
     const response =
       await openai.responses.create({
