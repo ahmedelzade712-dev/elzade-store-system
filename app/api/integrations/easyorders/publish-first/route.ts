@@ -215,7 +215,7 @@ async function run(request: Request, publish: boolean) {
       disable_orders_for_no_stock: true,
       variations: [{
         name: "المقاس",
-        type: "dropdown",
+        type: "buttons",
         props: stocks.map(v => ({ name: v.size, value: v.size })),
       }],
       variants: stocks.map(v => ({
