@@ -87,6 +87,13 @@ export default function AdoraSyncPage() {
     try {
       for(let i=0;i<targets.length;i++) {
         if(stop.current) {setInfo("تم الإيقاف بعد المنتج الحالي. يمكنك إعادة الفحص لاحقًا.");break;}
+        // EasyOrders allows 40 requests/minute. Each item involves several
+        // verification reads plus one write, so pace sequential processing.
+        if(i>0) {
+          setProgress("انتظار قصير لحماية الاتصال من حد EasyOrders (40 طلبًا/دقيقة)...");
+          await new Promise<void>(resolve=>setTimeout(resolve,11000));
+          if(stop.current) {setInfo("تم إيقاف العملية. استخدم الفحص لاحقًا لاستكمال الباقي.");break;}
+        }
         const p=targets[i];
         setProgress("مزامنة "+(i+1)+" من "+targets.length+": "+p.title);
         const r=await fetch("/api/integrations/easyorders/sync-adora",{
