@@ -30,7 +30,7 @@ export default function AdoraV3Editor(){
  const [email,setEmail]=useState(""),[password,setPassword]=useState("");
  const [settings,setSettings]=useState<Settings>(initial);
  const [catalog,setCatalog]=useState<Product[]>([]);
- const [query,setQuery]=useState("");
+ const [query,setQuery]=useState("");\n const [configUrl,setConfigUrl]=useState(""),[scriptUrl,setScriptUrl]=useState("");
  const [tab,setTab]=useState("hero"),[busy,setBusy]=useState(false),[notice,setNotice]=useState(""),[isPublished,setIsPublished]=useState(false);
  const [status,setStatus]=useState("");
  useEffect(()=>{supabase.auth.getUser().then(({data})=>setReady(!!data.user)).catch(()=>setReady(false)).finally(()=>setSessionLoading(false))},[]);
@@ -40,7 +40,7 @@ export default function AdoraV3Editor(){
  function modify<K extends "hero"|"headings"|"story">(key:K,field:keyof Settings[K],value:string){setSettings(s=>({...s,[key]:{...s[key],[field]:value}}))}
  async function load(){
   try{const r=await fetch("/api/adora-v3/editor",{headers:await headers(),cache:"no-store"});const j=await r.json();
-    if(!j.ok)throw Error(j.message);setSettings(j.config);setIsPublished(j.published);
+    if(!j.ok)throw Error(j.message);setSettings(j.config);setIsPublished(j.published);setConfigUrl(j.configUrl||"");
     setNotice(j.published?"تم تحميل إعدادات V3 المنشورة":"المحرر جاهز. احفظ مرة واحدة لتجهيز إعدادات V3.");
   }catch(e){setNotice(e instanceof Error?e.message:"تعذر التحميل")}
  }
@@ -53,7 +53,7 @@ export default function AdoraV3Editor(){
   setBusy(true);setNotice("");
   try{const r=await fetch("/api/adora-v3/editor",{method:"POST",headers:{...await headers(),"Content-Type":"application/json"},body:JSON.stringify(settings)});
    const j=await r.json();if(!j.ok)throw Error(j.message);
-   setSettings(j.config);setIsPublished(true);setNotice("تم حفظ ونشر إعدادات V3 بنجاح.");}
+   setSettings(j.config);setIsPublished(true);setConfigUrl(j.configUrl||"");setNotice("تم حفظ ونشر إعدادات V3 بنجاح.");}
   catch(e){setNotice(e instanceof Error?e.message:"فشل الحفظ")}
   finally{setBusy(false)}
  }
@@ -90,7 +90,7 @@ export default function AdoraV3Editor(){
    {notice&&<div role="status" className="rounded border border-neutral-600 p-3 text-sm">{notice}</div>}
    {status&&<div role="status" className="rounded border border-amber-600 p-3 text-sm text-amber-200">{status}</div>}
    <div className="rounded border border-neutral-700 p-3 text-sm text-neutral-300">الحفظ {isPublished?"مفعل":"لم يُنشر بعد"}. عند تغيير إعدادات المحرر، لا تتغير الصفحة حتى تضغط «نشر التعديلات». يعمل المتجر بالطلب والسلة الأصليين من EasyOrders.</div>
-   <div className="grid gap-5 md:grid-cols-[220px_1fr]">
+   <details className="rounded-xl border border-neutral-700 p-4"><summary className="cursor-pointer font-bold">الربط مع adora.ly — يُنفذ مرة واحدة فقط</summary>\n     <p className="mt-3 text-sm text-neutral-400">ارفع ملف Adora_V3_Managed_Editor_Connector.js إلى «رفع ملفات التصاميم» في EasyOrders. الصق رابط الملف هنا، ثم انسخ كود الهيد واستبدل سطر JavaScript القديم به فقط. بعد هذه المرة يكفي الضغط على «نشر» هنا.</p>\n     <label className="mt-3 block text-sm">رابط ملف JavaScript الجديد من EasyOrders<input className={input} dir="ltr" placeholder="https://files.easy-orders.net/..." value={scriptUrl} onChange={e=>setScriptUrl(e.target.value)}/></label>\n     <label className="mt-3 block text-sm">رابط الإعدادات المنشورة (يُولد تلقائيًا)<input className={input} dir="ltr" readOnly value={configUrl}/></label>\n     <textarea className={input+" mt-3 font-mono text-xs"} readOnly rows={3} dir="ltr" value={scriptUrl.startsWith("https://")&&configUrl.startsWith("https://")?`<script src="${scriptUrl.replace(/"/g,"")}" defer data-adora-v3="live" data-adora-config="${configUrl.replace(/"/g,"")}"></script>`:"ارفع JS أولًا واحفظ إعدادات المحرر لتوليد كود الربط."}/>\n     <button className={action+" mt-2"} disabled={!scriptUrl.startsWith("https://")||!configUrl.startsWith("https://")} onClick={()=>navigator.clipboard.writeText(`<script src="${scriptUrl.replace(/"/g,"")}" defer data-adora-v3="live" data-adora-config="${configUrl.replace(/"/g,"")}"></script>`).then(()=>setNotice("تم نسخ كود الهيد الجديد"))}>نسخ كود الهيد النهائي</button>\n   </details>\n   <div className="grid gap-5 md:grid-cols-[220px_1fr]">
     <aside className="flex flex-wrap content-start gap-2 md:flex-col">
      {keys.map(k=><button key={k} onClick={()=>setTab(k)} className={"rounded-md border px-3 py-2 text-right text-sm "+(tab===k?"border-white bg-white text-black":"border-neutral-700")}>{names[k]}</button>)}
     </aside>
