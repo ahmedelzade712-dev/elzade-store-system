@@ -1,0 +1,580 @@
+{
+  "source_description": "User-provided Almayar head office Tripoli price image, undated",
+  "reference_url": "https://almayardelivery.com/prices",
+  "origin": "فرع طرابلس الرئيسي",
+  "visible_rates": [
+    {
+      "region": "طرابلس",
+      "name": "داخل طرابلس",
+      "shipping_lyd": 15,
+      "store_display_name": "طرابلس"
+    },
+    {
+      "region": "طرابلس",
+      "name": "كريمة",
+      "shipping_lyd": 15,
+      "store_display_name": "كريمة"
+    },
+    {
+      "region": "طرابلس",
+      "name": "طريق المطار",
+      "shipping_lyd": 15,
+      "store_display_name": "طريق المطار"
+    },
+    {
+      "region": "طرابلس",
+      "name": "عين زارة",
+      "shipping_lyd": 15,
+      "store_display_name": "عين زارة"
+    },
+    {
+      "region": "طرابلس",
+      "name": "تاجوراء",
+      "shipping_lyd": 15,
+      "store_display_name": "تاجوراء"
+    },
+    {
+      "region": "طرابلس",
+      "name": "خلة",
+      "shipping_lyd": 15,
+      "store_display_name": "خلة"
+    },
+    {
+      "region": "طرابلس",
+      "name": "مشروع الهضبة",
+      "shipping_lyd": 15,
+      "store_display_name": "مشروع الهضبة"
+    },
+    {
+      "region": "المنطقة الشرقية",
+      "name": "بنغازي",
+      "shipping_lyd": 25,
+      "store_display_name": "بنغازي"
+    },
+    {
+      "region": "المنطقة الشرقية",
+      "name": "اجدابيا",
+      "shipping_lyd": 25,
+      "store_display_name": "اجدابيا"
+    },
+    {
+      "region": "المنطقة الشرقية",
+      "name": "توكرة",
+      "shipping_lyd": 35,
+      "store_display_name": "توكرة"
+    },
+    {
+      "region": "المنطقة الشرقية",
+      "name": "المرج",
+      "shipping_lyd": 35,
+      "store_display_name": "المرج"
+    },
+    {
+      "region": "المنطقة الشرقية",
+      "name": "الابيار",
+      "shipping_lyd": 35,
+      "store_display_name": "الابيار"
+    },
+    {
+      "region": "المنطقة الشرقية",
+      "name": "البيضاء",
+      "shipping_lyd": 35,
+      "store_display_name": "البيضاء"
+    },
+    {
+      "region": "المنطقة الشرقية",
+      "name": "قمينس",
+      "shipping_lyd": 35,
+      "store_display_name": "قمينس"
+    },
+    {
+      "region": "المنطقة الشرقية",
+      "name": "سلوق",
+      "shipping_lyd": 35,
+      "store_display_name": "سلوق"
+    },
+    {
+      "region": "المنطقة الشرقية",
+      "name": "شحات",
+      "shipping_lyd": 35,
+      "store_display_name": "شحات"
+    },
+    {
+      "region": "المنطقة الشرقية",
+      "name": "سوسة",
+      "shipping_lyd": 35,
+      "store_display_name": "سوسة"
+    },
+    {
+      "region": "المنطقة الشرقية",
+      "name": "القبة",
+      "shipping_lyd": 35,
+      "store_display_name": "القبة"
+    },
+    {
+      "region": "المنطقة الشرقية",
+      "name": "طبرق",
+      "shipping_lyd": 35,
+      "store_display_name": "طبرق"
+    },
+    {
+      "region": "المنطقة الشرقية",
+      "name": "درنة",
+      "shipping_lyd": 40,
+      "store_display_name": "درنة"
+    },
+    {
+      "region": "المنطقة الشرقية",
+      "name": "امساعد",
+      "shipping_lyd": 50,
+      "store_display_name": "امساعد"
+    },
+    {
+      "region": "المنطقة الجنوبية",
+      "name": "سبها",
+      "shipping_lyd": 30,
+      "store_display_name": "سبها"
+    },
+    {
+      "region": "المنطقة الجنوبية",
+      "name": "مزدة",
+      "shipping_lyd": 30,
+      "store_display_name": "مزدة"
+    },
+    {
+      "region": "المنطقة الجنوبية",
+      "name": "الشويرف",
+      "shipping_lyd": 30,
+      "store_display_name": "الشويرف"
+    },
+    {
+      "region": "المنطقة الجنوبية",
+      "name": "القريات",
+      "shipping_lyd": 30,
+      "store_display_name": "القريات"
+    },
+    {
+      "region": "المنطقة الجنوبية",
+      "name": "براك الشاطئ",
+      "shipping_lyd": 35,
+      "store_display_name": "براك الشاطئ"
+    },
+    {
+      "region": "المنطقة الجنوبية",
+      "name": "اوباري",
+      "shipping_lyd": 45,
+      "store_display_name": "اوباري"
+    },
+    {
+      "region": "المنطقة الجنوبية",
+      "name": "ام الارانب",
+      "shipping_lyd": 45,
+      "store_display_name": "ام الارانب"
+    },
+    {
+      "region": "المنطقة الجنوبية",
+      "name": "وادي عتبة",
+      "shipping_lyd": 45,
+      "store_display_name": "وادي عتبة"
+    },
+    {
+      "region": "المنطقة الجنوبية",
+      "name": "مرزق",
+      "shipping_lyd": 45,
+      "store_display_name": "مرزق"
+    },
+    {
+      "region": "المنطقة الجنوبية",
+      "name": "تراغن",
+      "shipping_lyd": 45,
+      "store_display_name": "تراغن"
+    },
+    {
+      "region": "المنطقة الجنوبية",
+      "name": "القطرون",
+      "shipping_lyd": 45,
+      "store_display_name": "القطرون"
+    },
+    {
+      "region": "المنطقة الجنوبية",
+      "name": "غات",
+      "shipping_lyd": 50,
+      "store_display_name": "غات"
+    },
+    {
+      "region": "غدامس",
+      "name": "غدامس",
+      "shipping_lyd": 40,
+      "store_display_name": "غدامس"
+    },
+    {
+      "region": "غدامس",
+      "name": "سيناون",
+      "shipping_lyd": 40,
+      "store_display_name": "سيناون"
+    },
+    {
+      "region": "غدامس",
+      "name": "الشعواء",
+      "shipping_lyd": 40,
+      "store_display_name": "الشعواء"
+    },
+    {
+      "region": "غدامس",
+      "name": "أوال",
+      "shipping_lyd": 40,
+      "store_display_name": "أوال"
+    },
+    {
+      "region": "المنطقة الوسطى",
+      "name": "سرت",
+      "shipping_lyd": 30,
+      "store_display_name": "سرت"
+    },
+    {
+      "region": "المنطقة الوسطى",
+      "name": "هراوة",
+      "shipping_lyd": 30,
+      "store_display_name": "هراوة"
+    },
+    {
+      "region": "المنطقة الوسطى",
+      "name": "بن جواد",
+      "shipping_lyd": 30,
+      "store_display_name": "بن جواد"
+    },
+    {
+      "region": "المنطقة الوسطى",
+      "name": "النوفلية",
+      "shipping_lyd": 30,
+      "store_display_name": "النوفلية"
+    },
+    {
+      "region": "المنطقة الوسطى",
+      "name": "راس لانوف",
+      "shipping_lyd": 30,
+      "store_display_name": "راس لانوف"
+    },
+    {
+      "region": "المنطقة الوسطى",
+      "name": "البريقة",
+      "shipping_lyd": 30,
+      "store_display_name": "البريقة"
+    },
+    {
+      "region": "المنطقة الوسطى",
+      "name": "العقيلة",
+      "shipping_lyd": 30,
+      "store_display_name": "العقيلة"
+    },
+    {
+      "region": "المنطقة الوسطى",
+      "name": "هون",
+      "shipping_lyd": 30,
+      "store_display_name": "هون"
+    },
+    {
+      "region": "المنطقة الوسطى",
+      "name": "سوكنة",
+      "shipping_lyd": 30,
+      "store_display_name": "سوكنة"
+    },
+    {
+      "region": "المنطقة الوسطى",
+      "name": "ودان",
+      "shipping_lyd": 30,
+      "store_display_name": "ودان"
+    },
+    {
+      "region": "المنطقة الوسطى",
+      "name": "الجفرة",
+      "shipping_lyd": 30,
+      "store_display_name": "الجفرة"
+    },
+    {
+      "region": "المنطقة الوسطى",
+      "name": "زلة",
+      "shipping_lyd": 40,
+      "store_display_name": "زلة"
+    },
+    {
+      "region": "الجبل الغربي",
+      "name": "غريان",
+      "shipping_lyd": 25,
+      "store_display_name": "غريان"
+    },
+    {
+      "region": "الجبل الغربي",
+      "name": "الاصابعة",
+      "shipping_lyd": 35,
+      "store_display_name": "الاصابعة"
+    },
+    {
+      "region": "الجبل الغربي",
+      "name": "الرابطة",
+      "shipping_lyd": 35,
+      "store_display_name": "الرابطة"
+    },
+    {
+      "region": "الجبل الغربي",
+      "name": "القواليش",
+      "shipping_lyd": 35,
+      "store_display_name": "القواليش"
+    },
+    {
+      "region": "الجبل الغربي",
+      "name": "العوينة",
+      "shipping_lyd": 35,
+      "store_display_name": "العوينة"
+    },
+    {
+      "region": "الجبل الغربي",
+      "name": "القلعة - يفرن",
+      "shipping_lyd": 35,
+      "store_display_name": "القلعة - يفرن"
+    },
+    {
+      "region": "الجبل الغربي",
+      "name": "الرياينة",
+      "shipping_lyd": 35,
+      "store_display_name": "الرياينة"
+    },
+    {
+      "region": "الجبل الغربي",
+      "name": "الرجبان",
+      "shipping_lyd": 35,
+      "store_display_name": "الرجبان"
+    },
+    {
+      "region": "الجبل الغربي",
+      "name": "الزنتان",
+      "shipping_lyd": 35,
+      "store_display_name": "الزنتان"
+    },
+    {
+      "region": "الجبل الغربي",
+      "name": "الرحيبات",
+      "shipping_lyd": 35,
+      "store_display_name": "الرحيبات"
+    },
+    {
+      "region": "الجبل الغربي",
+      "name": "جادو",
+      "shipping_lyd": 35,
+      "store_display_name": "جادو"
+    },
+    {
+      "region": "الجبل الغربي",
+      "name": "كاباو",
+      "shipping_lyd": 35,
+      "store_display_name": "كاباو"
+    },
+    {
+      "region": "الجبل الغربي",
+      "name": "الرقيعات",
+      "shipping_lyd": 35,
+      "store_display_name": "الرقيعات"
+    },
+    {
+      "region": "الجبل الغربي",
+      "name": "تيجي",
+      "shipping_lyd": 35,
+      "store_display_name": "تيجي"
+    },
+    {
+      "region": "الجبل الغربي",
+      "name": "بدر",
+      "shipping_lyd": 35,
+      "store_display_name": "بدر"
+    },
+    {
+      "region": "الجبل الغربي",
+      "name": "الجوش",
+      "shipping_lyd": 35,
+      "store_display_name": "الجوش"
+    },
+    {
+      "region": "جنوب طرابلس",
+      "name": "ترهونة",
+      "shipping_lyd": 25,
+      "store_display_name": "ترهونة"
+    },
+    {
+      "region": "جنوب طرابلس",
+      "name": "بني وليد",
+      "shipping_lyd": 25,
+      "store_display_name": "بني وليد"
+    },
+    {
+      "region": "جنوب طرابلس",
+      "name": "وادي الربيع",
+      "shipping_lyd": 20,
+      "store_display_name": "وادي الربيع"
+    },
+    {
+      "region": "جنوب طرابلس",
+      "name": "قصر بن غشير",
+      "shipping_lyd": 20,
+      "store_display_name": "قصر بن غشير"
+    },
+    {
+      "region": "جنوب طرابلس",
+      "name": "السبيعة",
+      "shipping_lyd": 20,
+      "store_display_name": "السبيعة"
+    },
+    {
+      "region": "جنوب طرابلس",
+      "name": "سوق الخميس مسيحل",
+      "shipping_lyd": 20,
+      "store_display_name": "سوق الخميس مسيحل"
+    },
+    {
+      "region": "جنوب طرابلس",
+      "name": "سيدي السايح",
+      "shipping_lyd": 20,
+      "store_display_name": "سيدي السايح"
+    },
+    {
+      "region": "الجنوب الشرقي",
+      "name": "جالو",
+      "shipping_lyd": 45,
+      "store_display_name": "جالو"
+    },
+    {
+      "region": "الجنوب الشرقي",
+      "name": "اوجلة",
+      "shipping_lyd": 45,
+      "store_display_name": "اوجلة"
+    },
+    {
+      "region": "الجنوب الشرقي",
+      "name": "الواحات",
+      "shipping_lyd": 45,
+      "store_display_name": "الواحات"
+    },
+    {
+      "region": "الجنوب الشرقي",
+      "name": "الكفرة",
+      "shipping_lyd": 45,
+      "store_display_name": "الكفرة"
+    },
+    {
+      "region": "غرب طرابلس",
+      "name": "الماية",
+      "shipping_lyd": 20,
+      "store_display_name": "الماية"
+    },
+    {
+      "region": "غرب طرابلس",
+      "name": "الزاوية",
+      "shipping_lyd": 20,
+      "store_display_name": "الزاوية"
+    },
+    {
+      "region": "غرب طرابلس",
+      "name": "المطرد",
+      "shipping_lyd": 20,
+      "store_display_name": "المطرد"
+    },
+    {
+      "region": "غرب طرابلس",
+      "name": "صرمان",
+      "shipping_lyd": 20,
+      "store_display_name": "صرمان"
+    },
+    {
+      "region": "غرب طرابلس",
+      "name": "صبراتة",
+      "shipping_lyd": 20,
+      "store_display_name": "صبراتة"
+    },
+    {
+      "region": "غرب طرابلس",
+      "name": "زوارة",
+      "shipping_lyd": 30,
+      "store_display_name": "زوارة"
+    },
+    {
+      "region": "غرب طرابلس",
+      "name": "العجيلات",
+      "shipping_lyd": 30,
+      "store_display_name": "العجيلات"
+    },
+    {
+      "region": "غرب طرابلس",
+      "name": "الجميل",
+      "shipping_lyd": 30,
+      "store_display_name": "الجميل"
+    },
+    {
+      "region": "غرب طرابلس",
+      "name": "رقدالين",
+      "shipping_lyd": 30,
+      "store_display_name": "رقدالين"
+    },
+    {
+      "region": "غرب طرابلس",
+      "name": "زلطن",
+      "shipping_lyd": 30,
+      "store_display_name": "زلطن"
+    },
+    {
+      "region": "غرب طرابلس",
+      "name": "راس جدير",
+      "shipping_lyd": 40,
+      "store_display_name": "راس جدير"
+    },
+    {
+      "region": "شرق طرابلس",
+      "name": "القرة بوللي",
+      "shipping_lyd": 20,
+      "store_display_name": "القرة بوللي"
+    },
+    {
+      "region": "شرق طرابلس",
+      "name": "قماطة",
+      "shipping_lyd": 20,
+      "store_display_name": "قماطة"
+    },
+    {
+      "region": "شرق طرابلس",
+      "name": "قصر خيار",
+      "shipping_lyd": 20,
+      "store_display_name": "قصر خيار"
+    },
+    {
+      "region": "شرق طرابلس",
+      "name": "الخمس",
+      "shipping_lyd": 20,
+      "store_display_name": "الخمس"
+    },
+    {
+      "region": "شرق طرابلس",
+      "name": "زليتن",
+      "shipping_lyd": 20,
+      "store_display_name": "زليتن"
+    },
+    {
+      "region": "شرق طرابلس",
+      "name": "مصراتة",
+      "shipping_lyd": 20,
+      "store_display_name": "مصراتة"
+    },
+    {
+      "region": "شرق طرابلس",
+      "name": "مسلاتة",
+      "shipping_lyd": 20,
+      "store_display_name": "مسلاتة"
+    }
+  ],
+  "rate_count": 94,
+  "uploaded_at": "2026-10-19",
+  "special_services_excluded": [
+    "طرابلس (خاصة)",
+    "طرابلس صباحا",
+    "المعيار سبيد",
+    "بنغازي نسائي"
+  ],
+  "warning": "Image has 94 destinations; not exhaustive relative to old ERP cities. API shipping PATCH may replace existing list. No automatic posting."
+}
