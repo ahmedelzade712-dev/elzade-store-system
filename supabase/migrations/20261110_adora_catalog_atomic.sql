@@ -174,6 +174,11 @@ BEGIN
 END;
 $$;
 
+-- Race-proof uniqueness across all design/color pairs, even on concurrent requests.
+-- Run after reviewing existing duplicates if the table was manually populated.
+CREATE UNIQUE INDEX IF NOT EXISTS agent_product_codes_design_color_unique
+ON public.agent_product_codes (design_code, lower(btrim(color_name)));
+
 REVOKE ALL ON FUNCTION public.erp_create_product_with_code(jsonb) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.erp_update_product_with_code(jsonb) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.erp_create_product_with_code(jsonb) TO service_role;
