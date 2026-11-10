@@ -137,16 +137,19 @@ export function selectCatalogNames(
   if(!ranked.length) return {status:"not_found",confidence:null,matches:[],suggestions:[]};
   const top=ranked[0].score;
   const best=ranked.filter(x=>x.score===top);
+  // Known equivalent spellings of a brand or color must ALL be returned.
+  // Example: a catalog might contain "Dior" and "ديور" as separately saved names.
+  if(top>=95) {
+    const equivalents=ranked.filter(x=>x.score>=95).map(x=>x.name);
+    return {
+      status:"matched",confidence:top===100?"exact":"alias",
+      matches:equivalents,suggestions:[]
+    };
+  }
   if(best.length>1) return {
     status:"ambiguous",confidence:null,matches:[],
     suggestions:best.map(x=>x.name).slice(0,8),
   };
-  // Color aliases like وردي / زهري may correspond to distinct stored colors:
-  // don't arbitrarily pick one. Return BOTH exactly equivalent entries for a color.
-  if(kind==="color" && top>=95) {
-    const equivalents=ranked.filter(x=>x.score>=95).map(x=>x.name);
-    return {status:"matched",confidence:top===100?"exact":"alias",matches:equivalents,suggestions:[]};
-  }
   // Brand name may be stored under different spelling variants; only return best
   // selection if it is sufficiently distinct.
   if(top<95 && ranked[1] && ranked[1].score >= top-5) return {
