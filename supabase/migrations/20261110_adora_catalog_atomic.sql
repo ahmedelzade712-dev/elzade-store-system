@@ -54,7 +54,7 @@ BEGIN
     store_id, sku, design_code, name, model, description, visual_features,
     product_type, fabric, main_image_url, default_cost_price, default_sale_price, is_active
   ) VALUES (
-    v_store, coalesce(nullif(btrim(p->>'sku'),''),'PRD-'||extract(epoch from clock_timestamp())::bigint::text),
+    v_store, coalesce(nullif(btrim(p->>'sku'),''),'PRD-'||substr(gen_random_uuid()::text,1,12)),
     v_design, btrim(p->>'name'), nullif(btrim(p->>'model'),''),
     coalesce(p->>'description',''), coalesce(p->>'visual_features',''),
     btrim(p->>'product_type'), btrim(p->>'fabric'), p->>'image_url', v_cost, v_price, true
@@ -178,6 +178,47 @@ $$;
 -- Run after reviewing existing duplicates if the table was manually populated.
 CREATE UNIQUE INDEX IF NOT EXISTS agent_product_codes_design_color_unique
 ON public.agent_product_codes (design_code, lower(btrim(color_name)));
+
+-- Read-only consistency check. Never inserts, updates, or deletes customer data.
+CREATE OR REPLACE FUNCTION public.erp_catalog_integrity_report()
+RETURNS jsonb LANGUAGE sql STABLE SECURITY INVOKER SET search_path = public, pg_temp
+AS $
+  WITH code_checks AS (
+    SELECT c.id, c.product_id, c.design_code, c.code, c.color_name, c.brand_name,
+      p.id AS linked_id, p.store_id AS store_id, p.is_active AS product_active,
+      (SELECT count(*) FROM public.product_variants v WHERE v.product_id=c.product_id) AS size_count,
+      (SELECT count(DISTINCT v.color) FROM public.product_variants v WHERE v.product_id=c.product_id) AS color_count,
+      (SELECT count(*) FROM public.product_variants v
+        WHERE v.product_id=c.product_id AND btrim(v.color)<>btrim(c.color_name)) AS bad_color_count,
+      (SELECT count(*) FROM public.product_variants v
+        WHERE v.product_id=c.product_id AND v.store_id<>p.store_id) AS bad_store_count
+    FROM public.agent_product_codes c
+    LEFT JOIN public.products p ON p.id=c.product_id
+  )
+  SELECT jsonb_build_object(
+    'linked_codes', (SELECT count(*) FROM code_checks),
+    'orphaned_codes', (SELECT count(*) FROM code_checks WHERE linked_id IS NULL),
+    'codes_without_sizes', (SELECT count(*) FROM code_checks WHERE size_count=0),
+    'codes_with_multiple_colors', (SELECT count(*) FROM code_checks WHERE color_count<>1),
+    'codes_with_color_mismatch', (SELECT count(*) FROM code_checks WHERE bad_color_count>0),
+    'codes_with_store_mismatch', (SELECT count(*) FROM code_checks WHERE bad_store_count>0),
+    'codes_with_design_mismatch', (SELECT count(*) FROM code_checks WHERE left(code,1)<>design_code),
+    'designs_with_multiple_brands', (
+      SELECT count(*) FROM (
+        SELECT design_code FROM public.agent_product_codes
+        GROUP BY design_code HAVING count(DISTINCT lower(btrim(brand_name)))>1
+      ) conflicts
+    ),
+    'unlinked_active_products', (
+      SELECT count(*) FROM public.products p
+      WHERE p.is_active IS TRUE
+        AND NOT EXISTS (SELECT 1 FROM public.agent_product_codes c WHERE c.product_id=p.id)
+    )
+  );
+$;
+
+REVOKE ALL ON FUNCTION public.erp_catalog_integrity_report() FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.erp_catalog_integrity_report() TO service_role;
 
 REVOKE ALL ON FUNCTION public.erp_create_product_with_code(jsonb) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.erp_update_product_with_code(jsonb) FROM PUBLIC, anon, authenticated;
