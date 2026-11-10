@@ -204,6 +204,35 @@ export default function NewProductPage() {
 
     setSaving(true);
     setMessage("جاري حفظ المنتج...");
+    if (isPajama) {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) throw new Error("يجب تسجيل الدخول بحساب المدير لإضافة بيجامة مع كود Adora");
+        const response = await fetch("/api/agent/product-codes", {
+          headers: { Authorization: `Bearer ${session.access_token}` }, cache: "no-store",
+        });
+        const result = await response.json();
+        if (!response.ok || !result.ok) throw new Error("تعذر التحقق من الأكواد الحالية قبل الحفظ");
+        const { data: { user } } = await supabase.auth.getUser();
+        const { data: profile } = await supabase.from("profiles")
+          .select("role,is_active").eq("id", user?.id || "").single();
+        if (profile?.role !== "admin" || !profile.is_active) {
+          throw new Error("إضافة البيجامات مع الأكواد تتطلب صلاحية المدير");
+        }
+        if ((result.codes || []).some((c: { code: string }) => c.code === normalizedAgentCode)) {
+          throw new Error("كود Adora مستخدم من قبل، اختر كودًا مختلفًا");
+        }
+        const conflictingDesign = (result.codes || []).find((c: { design_code: string; brand_name: string }) =>
+          c.design_code === effectiveDesignCode &&
+          c.brand_name.trim().toLocaleLowerCase() !== brandName.trim().toLocaleLowerCase()
+        );
+        if (conflictingDesign) throw new Error("حرف التصميم مرتبط ببراند آخر");
+      } catch (preflightError) {
+        setMessage(preflightError instanceof Error ? preflightError.message : "تعذر التحقق من الكود");
+        setSaving(false);
+        return;
+      }
+    }
 
     const finalSku = sku.trim() || `PRD-${Date.now()}`;
     let imageUrl = "";
