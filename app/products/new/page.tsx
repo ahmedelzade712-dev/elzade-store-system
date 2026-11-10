@@ -126,7 +126,9 @@ export default function NewProductPage() {
           headers: { Authorization: `Bearer ${session.access_token}` }, cache: "no-store",
         });
         const result = await response.json();
-        if (!response.ok || !result.ok) throw new Error(result.error || "تعذر اقتراح الكود");
+        if (!response.ok || !result.ok) {
+        writeRejected = true;
+        throw new Error(result.error || "تعذر اقتراح الكود");
         if (canceled) return;
         setAgentCode(result.suggested_code);
         if (result.existing_brand) {
@@ -275,6 +277,8 @@ export default function NewProductPage() {
 
     const finalSku = sku.trim() || `PRD-${Date.now()}`;
     let uploadedFileName = "";
+    let writeAttempted = false;
+    let writeRejected = false;
     try {
       const fileExt = imageFile.name.split(".").pop()?.toLowerCase() || "jpg";
       uploadedFileName = `${Date.now()}-${finalSku}.${fileExt}`;
@@ -287,6 +291,7 @@ export default function NewProductPage() {
 
       const {data:{session}} = await supabase.auth.getSession();
       if (!session) throw new Error("انتهت جلسة تسجيل الدخول");
+      writeAttempted = true;
       const response = await fetch("/api/agent/catalog-write", {
         method:"POST",
         headers: { Authorization:`Bearer ${session.access_token}`, "Content-Type":"application/json" },
@@ -305,12 +310,14 @@ export default function NewProductPage() {
         result.error === "CATALOG_MIGRATION_REQUIRED"
           ? "يجب تركيب ترحيل قاعدة البيانات قبل حفظ المنتجات بالنظام الجديد"
           : result.error || "فشل حفظ المنتج"
-      );
+        );
+      }
       setMessage(`تم حفظ المنتج والمقاسات والكود ${result.code} معًا بنجاح`);
       resetForm();
       uploadedFileName = "";
     } catch(error) {
-      if (uploadedFileName) {
+      // Do not delete the image after an ambiguous network failure: the DB may have committed.
+      if (uploadedFileName && (!writeAttempted || writeRejected)) {
         await supabase.storage.from("product-images").remove([uploadedFileName]);
       }
       setMessage(error instanceof Error ? error.message : "تعذر حفظ المنتج");
