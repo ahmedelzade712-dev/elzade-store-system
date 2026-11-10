@@ -82,6 +82,7 @@ export default function ProductsPage() {
   const [editDesignCode, setEditDesignCode] = useState("");
   const [editAgentCode, setEditAgentCode] = useState("");
   const [editBrandName, setEditBrandName] = useState("");
+  const [editAgentCodeActive, setEditAgentCodeActive] = useState(true);
   const [editingAgentCodeId, setEditingAgentCodeId] = useState("");
   const [editName, setEditName] = useState("");
   const [editModel, setEditModel] = useState("");
@@ -305,6 +306,7 @@ export default function ProductsPage() {
     setEditingAgentCodeId(codeLink?.id || "");
     setEditAgentCode(codeLink?.code || "");
     setEditBrandName(codeLink?.brand_name || "");
+    setEditAgentCodeActive(codeLink?.is_active !== false);
     setEditDesignCode(codeLink?.code
       ? codeLink.code.charAt(0)
       : (item.product?.design_code || ""));
@@ -508,8 +510,8 @@ export default function ProductsPage() {
       !editStoreId ||
       !effectiveDesignCode ||
       !editName.trim() ||
-      !editDescription.trim() ||
-      !editVisualFeatures.trim() ||
+      (!isPajama && !editDescription.trim()) ||
+      (!isPajama && !editVisualFeatures.trim()) ||
       !editType ||
       !editColor ||
       !editCostPrice ||
@@ -523,6 +525,35 @@ export default function ProductsPage() {
 
     setSavingEdit(true);
     setMessage("جاري حفظ بيانات المنتج...");
+    if (isPajama && normalizedAgentCode) {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) throw new Error("تعديل كود Adora يتطلب تسجيل الدخول بحساب المدير");
+        const response = await fetch("/api/agent/product-codes", {
+          headers: { Authorization: `Bearer ${session.access_token}` },
+          cache: "no-store",
+        });
+        const result = await response.json();
+        if (!response.ok || !result.ok) throw new Error(result.error || "تعذر التحقق من كود Adora");
+        const { data: { user } } = await supabase.auth.getUser();
+        const { data: profile } = await supabase.from("profiles")
+          .select("role,is_active").eq("id", user?.id || "").single();
+        if (profile?.role !== "admin" || !profile.is_active) {
+          throw new Error("تعديل كود Adora يتطلب صلاحية المدير");
+        }
+        if ((result.codes || []).some((c: { id: string; code: string }) =>
+          c.code === normalizedAgentCode && c.id !== editingAgentCodeId
+        )) throw new Error("هذا الكود مستخدم بالفعل لمنتج آخر");
+        if ((result.codes || []).some((c: { id: string; design_code: string; brand_name: string }) =>
+          c.id !== editingAgentCodeId && c.design_code === normalizedAgentCode.charAt(0) &&
+          c.brand_name.trim().toLocaleLowerCase() !== editBrandName.trim().toLocaleLowerCase()
+        )) throw new Error("هذا التصميم مرتبط ببراند مختلف");
+      } catch (e) {
+        setMessage(e instanceof Error ? e.message : "فشل فحص الكود");
+        setSavingEdit(false);
+        return;
+      }
+    }
 
     try {
       let finalImageUrl =
@@ -640,7 +671,7 @@ export default function ProductsPage() {
             brand_name: editBrandName.trim(),
             color_name: editColor,
             product_id: editItem.product_id,
-            is_active: true,
+            is_active: editAgentCodeActive,
           }),
         });
         const codeResult = await response.json();
@@ -1005,7 +1036,7 @@ export default function ProductsPage() {
 
               <input
                 className="rounded-xl bg-neutral-800 p-4"
-                placeholder="كود المنتج"
+                placeholder="الكود الداخلي (SKU)"
                 value={editSku}
                 onChange={(e) => setEditSku(e.target.value)}
               />
@@ -1021,6 +1052,11 @@ export default function ProductsPage() {
                     <input className="mt-2 w-full rounded-xl bg-neutral-800 p-4"
                       placeholder="مثال Dior" value={editBrandName}
                       onChange={(e) => setEditBrandName(e.target.value)} />
+                  </label>
+                  <label className="flex items-center gap-2 text-sm text-neutral-300">
+                    <input type="checkbox" checked={editAgentCodeActive}
+                      onChange={(e) => setEditAgentCodeActive(e.target.checked)} />
+                    الكود نشط للـAgent
                   </label>
                   <p className="text-xs text-neutral-400">
                     كود التصميم: {editAgentCode ? editAgentCode.charAt(0).toUpperCase() : editDesignCode || "-"}
