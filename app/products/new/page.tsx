@@ -126,9 +126,7 @@ export default function NewProductPage() {
           headers: { Authorization: `Bearer ${session.access_token}` }, cache: "no-store",
         });
         const result = await response.json();
-        if (!response.ok || !result.ok) {
-        writeRejected = true;
-        throw new Error(result.error || "تعذر اقتراح الكود");
+        if (!response.ok || !result.ok) throw new Error(result.error || "تعذر اقتراح الكود");
         if (canceled) return;
         setAgentCode(result.suggested_code);
         if (result.existing_brand) {
