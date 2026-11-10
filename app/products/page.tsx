@@ -525,7 +525,7 @@ export default function ProductsPage() {
   async function handleEditProduct() {
     if (!editItem || savingEdit) return;
 
-    const isPajama = editType === "بيجامة";
+    const isPajama = true;
     const normalizedAgentCode = editAgentCode.trim().toUpperCase();
     const effectiveDesignCode = isPajama && normalizedAgentCode
       ? normalizedAgentCode.charAt(0) : editDesignCode.trim();
@@ -544,8 +544,7 @@ export default function ProductsPage() {
       !editStoreId ||
       !effectiveDesignCode ||
       !editName.trim() ||
-      (!isPajama && !editDescription.trim()) ||
-      (!isPajama && !editVisualFeatures.trim()) ||
+
       !editType ||
       !editColor ||
       !editCostPrice ||
@@ -1080,59 +1079,32 @@ export default function ProductsPage() {
                 onChange={(e) => setEditSku(e.target.value)}
               />
 
-              {editType === "بيجامة" ? (
-                <div className="grid gap-3">
-                  <label className="text-sm text-neutral-300">حرف التصميم
-                    <input className="mt-2 w-full rounded-xl bg-neutral-800 p-4 uppercase"
-                      maxLength={1} dir="ltr" placeholder="D" value={editDesignCode}
-                      onChange={(e) => { void chooseEditDesign(e.target.value); }} />
-                  </label>
-                  <label className="text-sm text-neutral-300">كود البيجامة
-                    <input className="mt-2 w-full rounded-xl bg-neutral-800 p-4 text-neutral-300"
-                      dir="ltr" value={editCodeLoading ? "..." : editAgentCode} disabled
-                      placeholder="يُقترح تلقائيًا" />
-                    <span className="mt-1 block text-xs text-neutral-400">
-                      {editCodeHint || (editingAgentCodeId ? "الكود الحالي محفوظ؛ تغيير الحرف يقترح كودًا جديدًا." : "اكتب حرف التصميم ليُقترح الكود.")}
-                    </span>
-                  </label>
-                  <label className="text-sm text-neutral-300">اسم البراند
-                    <input className="mt-2 w-full rounded-xl bg-neutral-800 p-4"
-                      placeholder="مثال Dior" value={editBrandName}
-                      onChange={(e) => setEditBrandName(e.target.value)} />
-                  </label>
-                  <label className="flex items-center gap-2 text-sm text-neutral-300">
-                    <input type="checkbox" checked={editAgentCodeActive}
-                      onChange={(e) => setEditAgentCodeActive(e.target.checked)} />
-                    الكود نشط للـAgent
-                  </label>
-                </div>
-              ) : (
-              <div className="grid gap-2">
-                <select
-                  className="rounded-xl bg-neutral-800 p-4"
-                  value={designCodes.includes(editDesignCode) ? editDesignCode : ""}
-                  onChange={(e) => {
-                    if (e.target.value) {
-                      setEditDesignCode(e.target.value);
-                    }
-                  }}
-                >
-                  <option value="">اختر كود تصميم موجود</option>
-                  {designCodes.map((code) => (
-                    <option key={code} value={code}>
-                      {code}
-                    </option>
-                  ))}
-                </select>
-
-                <input
-                  className="rounded-xl bg-neutral-800 p-4"
-                  placeholder="أو اكتب كود تصميم جديد"
-                  value={editDesignCode}
-                  onChange={(e) => setEditDesignCode(e.target.value)}
-                />
+              <div className="grid gap-3">
+                <label className="text-sm text-neutral-300">حرف التصميم
+                  <input className="mt-2 w-full rounded-xl bg-neutral-800 p-4 uppercase"
+                    maxLength={1} dir="ltr" placeholder="D"
+                    value={editAgentCode ? editAgentCode.charAt(0) : (editDesignCode.length === 1 ? editDesignCode : "")}
+                    onChange={(e) => { void chooseEditDesign(e.target.value); }} />
+                </label>
+                <label className="text-sm text-neutral-300">كود المنتج
+                  <input className="mt-2 w-full rounded-xl bg-neutral-800 p-4 text-neutral-300"
+                    dir="ltr" value={editCodeLoading ? "..." : editAgentCode} disabled
+                    placeholder="يُقترح تلقائيًا" />
+                  <span className="mt-1 block text-xs text-neutral-400">
+                    {editCodeHint || (editingAgentCodeId ? "الكود الحالي محفوظ؛ تغيير الحرف يقترح كودًا جديدًا." : "اكتب حرف التصميم ليُقترح الكود.")}
+                  </span>
+                </label>
+                <label className="text-sm text-neutral-300">اسم البراند
+                  <input className="mt-2 w-full rounded-xl bg-neutral-800 p-4"
+                    placeholder="مثال Dior" value={editBrandName}
+                    onChange={(e) => setEditBrandName(e.target.value)} />
+                </label>
+                <label className="flex items-center gap-2 text-sm text-neutral-300">
+                  <input type="checkbox" checked={editAgentCodeActive}
+                    onChange={(e) => setEditAgentCodeActive(e.target.checked)} />
+                  الكود نشط للـAgent
+                </label>
               </div>
-              )}
 
               <input
                 className="rounded-xl bg-neutral-800 p-4"
