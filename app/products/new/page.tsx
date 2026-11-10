@@ -61,6 +61,8 @@ export default function NewProductPage() {
   const [storeId, setStoreId] = useState("");
   const [sku, setSku] = useState("");
   const [designCode, setDesignCode] = useState("");
+  const [agentCode, setAgentCode] = useState("");
+  const [brandName, setBrandName] = useState("");
   const [name, setName] = useState("");
   const [model, setModel] = useState("");
   const [description, setDescription] = useState("");
@@ -126,6 +128,8 @@ export default function NewProductPage() {
   function resetForm() {
     setSku("");
     setDesignCode("");
+    setAgentCode("");
+    setBrandName("");
     setName("");
     setModel("");
     setDescription("");
@@ -152,15 +156,23 @@ export default function NewProductPage() {
 
     setMessage("");
 
+    const isPajama = productType === "بيجامة";
+    const normalizedAgentCode = agentCode.trim().toUpperCase();
+    const effectiveDesignCode = isPajama ? normalizedAgentCode.charAt(0) : designCode.trim();
+    if (isPajama && (!/^[A-Z][0-9]{2,}$/.test(normalizedAgentCode) || !brandName.trim())) {
+      setMessage("للبيجامات يلزم كود Adora مثل D01 واسم البراند");
+      return;
+    }
+
     const requiredMissing =
       !storeId ||
-      !designCode.trim() ||
+      !effectiveDesignCode ||
       !name.trim() ||
       !productType ||
       !color ||
       !fabric.trim() ||
-      !description.trim() ||
-      !visualFeatures.trim() ||
+      (!isPajama && !description.trim()) ||
+      (!isPajama && !visualFeatures.trim()) ||
       !costPrice ||
       !salePrice ||
       !imageFile;
@@ -192,6 +204,35 @@ export default function NewProductPage() {
 
     setSaving(true);
     setMessage("جاري حفظ المنتج...");
+    if (isPajama) {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) throw new Error("يجب تسجيل الدخول بحساب المدير لإضافة بيجامة مع كود Adora");
+        const response = await fetch("/api/agent/product-codes", {
+          headers: { Authorization: `Bearer ${session.access_token}` }, cache: "no-store",
+        });
+        const result = await response.json();
+        if (!response.ok || !result.ok) throw new Error("تعذر التحقق من الأكواد الحالية قبل الحفظ");
+        const { data: { user } } = await supabase.auth.getUser();
+        const { data: profile } = await supabase.from("profiles")
+          .select("role,is_active").eq("id", user?.id || "").single();
+        if (profile?.role !== "admin" || !profile.is_active) {
+          throw new Error("إضافة البيجامات مع الأكواد تتطلب صلاحية المدير");
+        }
+        if ((result.codes || []).some((c: { code: string }) => c.code === normalizedAgentCode)) {
+          throw new Error("كود Adora مستخدم من قبل، اختر كودًا مختلفًا");
+        }
+        const conflictingDesign = (result.codes || []).find((c: { design_code: string; brand_name: string }) =>
+          c.design_code === effectiveDesignCode &&
+          c.brand_name.trim().toLocaleLowerCase() !== brandName.trim().toLocaleLowerCase()
+        );
+        if (conflictingDesign) throw new Error("حرف التصميم مرتبط ببراند آخر");
+      } catch (preflightError) {
+        setMessage(preflightError instanceof Error ? preflightError.message : "تعذر التحقق من الكود");
+        setSaving(false);
+        return;
+      }
+    }
 
     const finalSku = sku.trim() || `PRD-${Date.now()}`;
     let imageUrl = "";
@@ -224,7 +265,7 @@ export default function NewProductPage() {
         .insert({
           store_id: storeId,
           sku: finalSku,
-          design_code: designCode.trim(),
+          design_code: effectiveDesignCode,
           name: name.trim(),
           model: model.trim() || null,
           description: description.trim(),
@@ -265,7 +306,42 @@ export default function NewProductPage() {
         throw new Error("خطأ في حفظ المقاسات: " + variantError.message);
       }
 
-      setMessage("تم حفظ المنتج وكل المقاسات في المخزون بنجاح");
+      if (isPajama) {
+        try {
+          const { data: { session } } = await supabase.auth.getSession();
+          if (!session) throw new Error("انتهت جلسة تسجيل الدخول");
+          const response = await fetch("/api/agent/product-codes", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${session.access_token}`,
+            },
+            body: JSON.stringify({
+              code: normalizedAgentCode,
+              design_code: effectiveDesignCode,
+              brand_name: brandName.trim(),
+              color_name: color,
+              product_id: product.id,
+              is_active: true,
+            }),
+          });
+          const codeResult = await response.json();
+          if (!response.ok || !codeResult.ok) {
+            throw new Error(codeResult.error || "فشل تسجيل كود Adora");
+          }
+        } catch (codeError) {
+          setMessage(
+            `تم حفظ المنتج والمقاسات بالفعل في ERP، لكن لم يُربط كود Adora (${normalizedAgentCode}). ` +
+            "لا تُعد إنشاء المنتج. افتح صفحة المنتجات ثم اضغط تعديل على المنتج الموجود لإكمال ربط الكود. السبب: " +
+            (codeError instanceof Error ? codeError.message : "خطأ غير معروف")
+          );
+          return;
+        }
+      }
+
+      setMessage(isPajama
+        ? `تم حفظ المنتج والمقاسات وربط كود Adora ${normalizedAgentCode} بنجاح`
+        : "تم حفظ المنتج وكل المقاسات في المخزون بنجاح");
       resetForm();
     } catch (error: any) {
       if (createdProductId) {
@@ -323,15 +399,37 @@ export default function NewProductPage() {
             </label>
 
             <label className="grid gap-2">
-              <span className="text-sm text-neutral-300">كود المنتج</span>
+              <span className="text-sm text-neutral-300">الكود الداخلي (SKU)</span>
               <input
                 className="rounded-xl bg-neutral-800 p-4"
-                placeholder="اختياري - يضاف تلقائيًا إذا تركته فارغًا"
+                placeholder="الكود الداخلي (SKU) — اختياري"
                 value={sku}
                 onChange={(e) => setSku(e.target.value)}
               />
             </label>
 
+            {productType === "بيجامة" ? (
+              <>
+                <label className="grid gap-2">
+                  <span className="text-sm text-neutral-300">كود Adora (التصميم واللون) *</span>
+                  <input className="rounded-xl bg-neutral-800 p-4" value={agentCode}
+                    onChange={(e) => setAgentCode(e.target.value.toUpperCase())}
+                    placeholder="مثل D01" required dir="ltr" maxLength={12} />
+                  <span className="text-xs text-neutral-500">حرف التصميم ثم رقم اللون؛ مثال D01</span>
+                </label>
+                <label className="grid gap-2">
+                  <span className="text-sm text-neutral-300">اسم البراند *</span>
+                  <input className="rounded-xl bg-neutral-800 p-4" value={brandName}
+                    onChange={(e) => setBrandName(e.target.value)}
+                    placeholder="Dior / Fendi / Victoria" required />
+                </label>
+                <label className="grid gap-2">
+                  <span className="text-sm text-neutral-300">كود التصميم (تلقائي)</span>
+                  <input className="rounded-xl bg-neutral-800 p-4 text-neutral-400"
+                    value={agentCode.trim().toUpperCase().charAt(0)} disabled dir="ltr" />
+                </label>
+              </>
+            ) : (
             <label className="grid gap-2">
               <span className="text-sm text-neutral-300">كود التصميم *</span>
               <input
@@ -345,6 +443,7 @@ export default function NewProductPage() {
                 جميع ألوان نفس التصميم يجب أن تحمل نفس الكود.
               </span>
             </label>
+            )}
 
             <label className="grid gap-2">
               <span className="text-sm text-neutral-300">اسم المنتج *</span>
@@ -415,31 +514,31 @@ export default function NewProductPage() {
         </section>
 
         <section className="rounded-2xl border border-neutral-800 bg-neutral-900 p-5">
-          <h2 className="mb-2 text-xl font-bold">بيانات تساعد الـAI على فهم التصميم</h2>
+          <h2 className="mb-2 text-xl font-bold">وصف ومواصفات المنتج</h2>
           <p className="mb-4 text-sm text-neutral-400">
-            الصورة هي المرجع الأساسي. هذه الحقول تساعد الـAI عند وجود تصميمات متشابهة.
+            يعتمد Agent البيجامات على الكود؛ الوصف والعلامات البصرية اختياريان للبيجامات.
           </p>
 
           <div className="grid gap-4">
             <label className="grid gap-2">
-              <span className="text-sm text-neutral-300">وصف المنتج *</span>
+              <span className="text-sm text-neutral-300">وصف المنتج {productType === "بيجامة" ? "(اختياري)" : "*"}</span>
               <textarea
                 className="min-h-28 rounded-xl bg-neutral-800 p-4"
                 placeholder="مثال: بدلة لينو بقصة واسعة، ياقة V، رابطة جانبية، بدون أزرار ظاهرة، بنطال واسع"
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                required
+                required={productType !== "بيجامة"}
               />
             </label>
 
             <label className="grid gap-2">
-              <span className="text-sm text-neutral-300">العلامات المميزة للـAI *</span>
+              <span className="text-sm text-neutral-300">العلامات المميزة للـAI {productType === "بيجامة" ? "(اختياري)" : "*"}</span>
               <textarea
                 className="min-h-24 rounded-xl bg-neutral-800 p-4"
                 placeholder="مثال: ياقة V | رابطة جانبية | بدون أزرار | أكمام واسعة | بنطال واسع"
                 value={visualFeatures}
                 onChange={(e) => setVisualFeatures(e.target.value)}
-                required
+                required={productType !== "بيجامة"}
               />
               <span className="text-xs text-neutral-500">
                 اكتب فقط العلامات البصرية التي تميز التصميم. لا تكرر اللون هنا.
@@ -485,7 +584,7 @@ export default function NewProductPage() {
         <section className="rounded-2xl border border-neutral-800 bg-neutral-900 p-5">
           <label className="mb-3 block font-bold">صورة المنتج / اللون *</label>
           <p className="mb-4 text-sm text-neutral-400">
-            ضع أوضح صورة لهذا اللون. الصورة نفسها ستُستخدم لاحقًا كمرجع بصري للـAI.
+            ضع أوضح صورة للون المنتج؛ سيعرضها الـAgent ضمن ألوان هذا التصميم.
           </p>
 
           <input type="file" accept="image/*" onChange={handleImageChange} required />

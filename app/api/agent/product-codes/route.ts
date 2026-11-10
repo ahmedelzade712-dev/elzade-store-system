@@ -28,6 +28,12 @@ function errorResponse(error: unknown) {
 export async function GET(request: Request) {
   try {
     const profile = await requireUser(request);
+    const { data: allStores, error: storesError } = await supabaseAdmin
+      .from("stores").select("id,name").order("name");
+    if (storesError) throw storesError;
+    const stores = profile.role === "admin"
+      ? (allStores || [])
+      : (allStores || []).filter(store => store.id === profile.store_id);
     let query = supabaseAdmin.from("products")
       .select("id,store_id,name,sku,product_type,main_image_url,is_active")
       .order("name").limit(2000);
@@ -38,7 +44,7 @@ export async function GET(request: Request) {
     const { data: products, error: productsError } = await query;
     if (productsError) throw productsError;
     const ids = (products || []).map((p) => p.id as string);
-    if (ids.length === 0) return NextResponse.json({ ok: true, products: [], codes: [] });
+    if (ids.length === 0) return NextResponse.json({ ok: true, stores, products: [], codes: [] });
 
     const [{ data: variants, error: variantsError }, { data: codes, error: codesError }] =
       await Promise.all([
@@ -58,6 +64,7 @@ export async function GET(request: Request) {
     }
     return NextResponse.json({
       ok: true,
+      stores,
       products: (products || []).map((p) => ({
         ...p, colors: [...(colorMap.get(p.id) || new Set())],
       })),

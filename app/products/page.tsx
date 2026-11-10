@@ -59,6 +59,7 @@ export default function ProductsPage() {
   }
 
   const [variants, setVariants] = useState<any[]>([]);
+  const [agentCodes, setAgentCodes] = useState<any[]>([]);
   const [stores, setStores] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
@@ -79,6 +80,10 @@ export default function ProductsPage() {
   const [editStoreId, setEditStoreId] = useState("");
   const [editSku, setEditSku] = useState("");
   const [editDesignCode, setEditDesignCode] = useState("");
+  const [editAgentCode, setEditAgentCode] = useState("");
+  const [editBrandName, setEditBrandName] = useState("");
+  const [editAgentCodeActive, setEditAgentCodeActive] = useState(true);
+  const [editingAgentCodeId, setEditingAgentCodeId] = useState("");
   const [editName, setEditName] = useState("");
   const [editModel, setEditModel] = useState("");
   const [editDescription, setEditDescription] = useState("");
@@ -108,6 +113,21 @@ export default function ProductsPage() {
       .order("name");
 
     setStores(storesData || []);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session) {
+        const response = await fetch("/api/agent/product-codes", {
+          headers: { Authorization: `Bearer ${session.access_token}` },
+          cache: "no-store",
+        });
+        if (response.ok) {
+          const result = await response.json();
+          if (result.ok) setAgentCodes(result.codes || []);
+        }
+      }
+    } catch {
+      // Core product management remains available if the code catalog cannot load.
+    }
 
     const { data, error } = await supabase
       .from("product_variants")
@@ -196,6 +216,8 @@ export default function ProductsPage() {
       const text = `
         ${item.product?.sku || ""}
         ${item.product?.design_code || ""}
+        ${agentCodes.find((c) => c.product_id === item.product_id)?.code || ""}
+        ${agentCodes.find((c) => c.product_id === item.product_id)?.brand_name || ""}
         ${item.product?.name || ""}
         ${item.product?.model || ""}
         ${item.product?.description || ""}
@@ -210,7 +232,7 @@ export default function ProductsPage() {
         (!storeFilter || item.store_id === storeFilter)
       );
     });
-  }, [groupedProducts, search, storeFilter]);
+  }, [groupedProducts, agentCodes, search, storeFilter]);
 
   const designCodes = useMemo(() => {
     return Array.from(
@@ -280,7 +302,14 @@ export default function ProductsPage() {
     setEditItem(item);
     setEditStoreId(item.store_id || item.product?.store_id || "");
     setEditSku(item.product?.sku || "");
-    setEditDesignCode(item.product?.design_code || "");
+    const codeLink = agentCodes.find((c) => c.product_id === item.product_id);
+    setEditingAgentCodeId(codeLink?.id || "");
+    setEditAgentCode(codeLink?.code || "");
+    setEditBrandName(codeLink?.brand_name || "");
+    setEditAgentCodeActive(codeLink?.is_active !== false);
+    setEditDesignCode(codeLink?.code
+      ? codeLink.code.charAt(0)
+      : (item.product?.design_code || ""));
     setEditName(item.product?.name || "");
     setEditModel(item.product?.model || "");
     setEditDescription(item.product?.description || "");
@@ -463,12 +492,26 @@ export default function ProductsPage() {
   async function handleEditProduct() {
     if (!editItem || savingEdit) return;
 
+    const isPajama = editType === "بيجامة";
+    const normalizedAgentCode = editAgentCode.trim().toUpperCase();
+    const effectiveDesignCode = isPajama && normalizedAgentCode
+      ? normalizedAgentCode.charAt(0) : editDesignCode.trim();
+    if (isPajama && normalizedAgentCode && (
+      !/^[A-Z][0-9]{2,}$/.test(normalizedAgentCode) || !editBrandName.trim()
+    )) {
+      setMessage("كود Adora يجب أن يكون مثل D01، مع كتابة اسم البراند");
+      return;
+    }
+    if (isPajama && editingAgentCodeId && !normalizedAgentCode) {
+      setMessage("لا يمكن حذف ارتباط الكود بهذه الطريقة؛ يمكنك إيقافه من بيانات المنتج لاحقًا");
+      return;
+    }
     if (
       !editStoreId ||
-      !editDesignCode.trim() ||
+      !effectiveDesignCode ||
       !editName.trim() ||
-      !editDescription.trim() ||
-      !editVisualFeatures.trim() ||
+      (!isPajama && !editDescription.trim()) ||
+      (!isPajama && !editVisualFeatures.trim()) ||
       !editType ||
       !editColor ||
       !editCostPrice ||
@@ -482,6 +525,35 @@ export default function ProductsPage() {
 
     setSavingEdit(true);
     setMessage("جاري حفظ بيانات المنتج...");
+    if (isPajama && normalizedAgentCode) {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) throw new Error("تعديل كود Adora يتطلب تسجيل الدخول بحساب المدير");
+        const response = await fetch("/api/agent/product-codes", {
+          headers: { Authorization: `Bearer ${session.access_token}` },
+          cache: "no-store",
+        });
+        const result = await response.json();
+        if (!response.ok || !result.ok) throw new Error(result.error || "تعذر التحقق من كود Adora");
+        const { data: { user } } = await supabase.auth.getUser();
+        const { data: profile } = await supabase.from("profiles")
+          .select("role,is_active").eq("id", user?.id || "").single();
+        if (profile?.role !== "admin" || !profile.is_active) {
+          throw new Error("تعديل كود Adora يتطلب صلاحية المدير");
+        }
+        if ((result.codes || []).some((c: { id: string; code: string }) =>
+          c.code === normalizedAgentCode && c.id !== editingAgentCodeId
+        )) throw new Error("هذا الكود مستخدم بالفعل لمنتج آخر");
+        if ((result.codes || []).some((c: { id: string; design_code: string; brand_name: string }) =>
+          c.id !== editingAgentCodeId && c.design_code === normalizedAgentCode.charAt(0) &&
+          c.brand_name.trim().toLocaleLowerCase() !== editBrandName.trim().toLocaleLowerCase()
+        )) throw new Error("هذا التصميم مرتبط ببراند مختلف");
+      } catch (e) {
+        setMessage(e instanceof Error ? e.message : "فشل فحص الكود");
+        setSavingEdit(false);
+        return;
+      }
+    }
 
     try {
       let finalImageUrl =
@@ -513,7 +585,7 @@ export default function ProductsPage() {
         .update({
           store_id: editStoreId,
           sku: editSku.trim() || null,
-          design_code: editDesignCode.trim(),
+          design_code: effectiveDesignCode,
           name: editName.trim(),
           model: editModel.trim() || null,
           description: editDescription.trim(),
@@ -574,7 +646,7 @@ export default function ProductsPage() {
       }
 
       if (
-        String(verifyProduct.design_code || "") !== editDesignCode.trim() ||
+        String(verifyProduct.design_code || "") !== effectiveDesignCode ||
         String(verifyProduct.description || "") !== editDescription.trim() ||
         String(verifyProduct.visual_features || "") !== editVisualFeatures.trim()
       ) {
@@ -583,7 +655,35 @@ export default function ProductsPage() {
         );
       }
 
-      setMessage("تم حفظ بيانات المنتج بنجاح");
+      if (isPajama && normalizedAgentCode) {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) throw new Error("تم حفظ المنتج لكن تعذر ربط كود Adora لأن الجلسة انتهت");
+        const response = await fetch("/api/agent/product-codes", {
+          method: editingAgentCodeId ? "PATCH" : "POST",
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            id: editingAgentCodeId || undefined,
+            code: normalizedAgentCode,
+            design_code: normalizedAgentCode.charAt(0),
+            brand_name: editBrandName.trim(),
+            color_name: editColor,
+            product_id: editItem.product_id,
+            is_active: editAgentCodeActive,
+          }),
+        });
+        const codeResult = await response.json();
+        if (!response.ok || !codeResult.ok) {
+          throw new Error(
+            "تم حفظ بيانات المنتج بالفعل، لكن ربط كود Adora لم ينجح. " +
+            "لا تكرر تعديل البيانات؛ راجع الكود وحاول حفظه مرة أخرى. السبب: " +
+            (codeResult.error || "خطأ غير معروف")
+          );
+        }
+      }
+      setMessage("تم حفظ بيانات المنتج" + (normalizedAgentCode ? " وكود Adora" : "") + " بنجاح");
       setEditImageFile(null);
       setEditPreview(finalImageUrl || "");
       await loadData();
@@ -599,6 +699,11 @@ export default function ProductsPage() {
   async function handleDeleteProduct() {
     if (!deleteItem) return;
 
+    if (agentCodes.some((c) => c.product_id === deleteItem.product_id)) {
+      setMessage("هذا المنتج مرتبط بكود Adora؛ لا يمكن حذفه لأن ذلك سيفصل الكود عن الصور القديمة. قم بإيقافه عن البيع بدلًا من الحذف.");
+      setDeleteItem(null);
+      return;
+    }
     setMessage("جاري حذف المنتج...");
 
     const { error: variantsError } = await supabase
@@ -715,6 +820,12 @@ export default function ProductsPage() {
                 </p>
                 <p className="text-sm text-neutral-400">
                   كود التصميم: {item.product?.design_code || "-"}
+                </p>
+                <p className="text-sm text-neutral-400">
+                  كود Adora: {agentCodes.find((c) => c.product_id === item.product_id)?.code || "غير مرتبط"}
+                </p>
+                <p className="text-sm text-neutral-400">
+                  البراند: {agentCodes.find((c) => c.product_id === item.product_id)?.brand_name || "-"}
                 </p>
                 <p className="text-sm text-neutral-400">
                   النوع: {item.product?.product_type || "-"}
@@ -930,11 +1041,33 @@ export default function ProductsPage() {
 
               <input
                 className="rounded-xl bg-neutral-800 p-4"
-                placeholder="كود المنتج"
+                placeholder="الكود الداخلي (SKU)"
                 value={editSku}
                 onChange={(e) => setEditSku(e.target.value)}
               />
 
+              {editType === "بيجامة" ? (
+                <div className="grid gap-3">
+                  <label className="text-sm text-neutral-300">كود Adora (التصميم واللون)
+                    <input className="mt-2 w-full rounded-xl bg-neutral-800 p-4"
+                      placeholder="مثال D01" dir="ltr" value={editAgentCode}
+                      onChange={(e) => setEditAgentCode(e.target.value.toUpperCase())} />
+                  </label>
+                  <label className="text-sm text-neutral-300">اسم البراند
+                    <input className="mt-2 w-full rounded-xl bg-neutral-800 p-4"
+                      placeholder="مثال Dior" value={editBrandName}
+                      onChange={(e) => setEditBrandName(e.target.value)} />
+                  </label>
+                  <label className="flex items-center gap-2 text-sm text-neutral-300">
+                    <input type="checkbox" checked={editAgentCodeActive}
+                      onChange={(e) => setEditAgentCodeActive(e.target.checked)} />
+                    الكود نشط للـAgent
+                  </label>
+                  <p className="text-xs text-neutral-400">
+                    كود التصميم: {editAgentCode ? editAgentCode.charAt(0).toUpperCase() : editDesignCode || "-"}
+                  </p>
+                </div>
+              ) : (
               <div className="grid gap-2">
                 <select
                   className="rounded-xl bg-neutral-800 p-4"
@@ -960,6 +1093,7 @@ export default function ProductsPage() {
                   onChange={(e) => setEditDesignCode(e.target.value)}
                 />
               </div>
+              )}
 
               <input
                 className="rounded-xl bg-neutral-800 p-4"
