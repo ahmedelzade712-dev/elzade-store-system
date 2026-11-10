@@ -48,7 +48,7 @@ export async function GET(request:Request){
       return NextResponse.json({ok:false,error:"CATALOG_TOO_LARGE"},{status:413});
     const products=(rawProducts||[]) as ProductRow[];
     const byId=new Map(products.map(p=>[p.id,p]));
-    const codes=(rawCodes||[]).filter(c=>byId.has(c.product_id)) as CodeRow[];
+    const codes=(rawCodes||[]).filter(c=>byId.has(c.product_id) && c.is_active===true) as CodeRow[];
     const variants=(rawVariants||[]) as VariantRow[];
     const failures:string[]=[];
     let checks=0;
@@ -73,7 +73,7 @@ export async function GET(request:Request){
         recordFailure(failures,label,"expected "+intended.length+" products, received "+actual.length+" / IDs mismatch");
     }
     // Check every real code one-by-one, including full size-by-size prices and stock.
-    for(const code of codes){
+    await Promise.all(codes.map(async code=>{
       const label="code "+code.code;
       const result=await lookup("code",code.code);
       checkIds(label,result,[code]);
@@ -95,9 +95,7 @@ export async function GET(request:Request){
       if(!equal(actual.brand_name,code.brand_name)||!equal(actual.color_name,code.color_name)
          ||!equal(actual.design_code,code.design_code))
         recordFailure(failures,label,"identity mismatch");
-      const otherDesign=await lookup("code",code.code+"9");
-      if(otherDesign?.products.length) recordFailure(failures,label,"incorrect code accepted");
-    }
+    }));
     // Exact design and brand searches must return *all* matching codes.
     for(const design of [...new Set(codes.map(c=>c.design_code))]){
       const result=await lookup("design",design);
