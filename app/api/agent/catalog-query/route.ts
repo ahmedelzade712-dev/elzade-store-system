@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { resolveCatalogSearch, normalizeCatalogText } from "@/lib/catalogSearch";
 
 const allowed = new Set(["code","design","brand","color"]);
-const norm = (v:string) => v.trim().toLocaleLowerCase();
 
 async function authorize(request: Request) {
   const serviceKey = process.env.AGENT_INTERNAL_API_KEY;
@@ -36,34 +36,59 @@ export async function GET(request: Request) {
     if (auth.role !== "admin" && auth.role !== "internal" && auth.store_id !== storeId) {
       return NextResponse.json({ok:false,error:"FORBIDDEN"},{status:403});
     }
-    // First filter by catalog identity; no pictures, secret costs or unrelated stores are exposed.
-    let catalogQuery = supabaseAdmin.from("agent_product_codes")
+    // Always scope to the requested store before matching a brand or color.
+    // Fetch all catalog identities for that store; fuzzy matching must not truncate or cross stores.
+    const {data:storeProducts,error:storeError}=await supabaseAdmin.from("products")
+      .select("id,store_id,name,product_type,fabric,main_image_url,is_active")
+      .eq("store_id",storeId).eq("is_active",true).limit(1001);
+    if(storeError) throw storeError;
+    if((storeProducts||[]).length>1000)
+      return NextResponse.json({ok:false,error:"CATALOG_TOO_LARGE"},{status:413});
+    if(!storeProducts?.length)
+      return NextResponse.json({ok:true,store_id:storeId,by,value,match_status:"not_found",products:[]});
+    const ids=storeProducts.map(p=>p.id);
+    const {data:allCodes,error:codesError}=await supabaseAdmin.from("agent_product_codes")
       .select("product_id,code,design_code,brand_name,color_name,is_active")
-      .eq("is_active",true).limit(1001);
-    if (by === "code") catalogQuery = catalogQuery.eq("code",value.toUpperCase());
-    if (by === "design") catalogQuery = catalogQuery.eq("design_code",value.toUpperCase());
-    if (by === "brand") catalogQuery = catalogQuery.ilike("brand_name",value);
-    if (by === "color") catalogQuery = catalogQuery.ilike("color_name",value);
-    const {data:codes,error:codesError} = await catalogQuery;
-    if (codesError) throw codesError;
-    if (!codes?.length) return NextResponse.json({ok:true,store_id:storeId,products:[]});
-    if (codes.length > 1000) {
-      return NextResponse.json({ok:false,error:"TOO_MANY_CATALOG_MATCHES"},{status:413});
-    }
-    const ids=codes.map(c=>c.product_id);
+      .eq("is_active",true).in("product_id",ids).limit(1001);
+    if(codesError) throw codesError;
+    if((allCodes||[]).length>1000)
+      return NextResponse.json({ok:false,error:"CATALOG_TOO_LARGE"},{status:413});
 
-    const [{data:products,error:productError},{data:variants,error:variantError}] = await Promise.all([
-      supabaseAdmin.from("products")
-        .select("id,store_id,name,product_type,fabric,main_image_url,is_active")
-        .eq("store_id",storeId).eq("is_active",true).in("id",ids).limit(1000),
-      supabaseAdmin.from("product_variants")
-        .select("product_id,color,size,sale_price,stock_quantity,is_active,image_url")
-        .eq("store_id",storeId).in("product_id",ids).limit(10001),
-    ]);
-    if (productError) throw productError;
-    if (variantError) throw variantError;
-    if ((variants || []).length > 10000) return NextResponse.json({ok:false,error:"TOO_MANY_VARIANTS"},{status:413});
-    const productById = new Map((products||[]).map(p=>[p.id,p]));
+    let matchStatus: "matched"|"ambiguous"|"not_found"="matched";
+    let quality: "exact"|"alias"|"fuzzy"|undefined="exact";
+    let suggestions: string[]=[];
+    let codes=allCodes||[];
+    if(by==="code" || by==="design"){
+      const candidate=normalizeCatalogText(value).replace(/\s/g,"").toUpperCase();
+      // Never typo-correct short product codes: a wrong code means a different product.
+      if(by==="code" && !/^[A-Z][0-9]{2,}$/.test(candidate))
+        return NextResponse.json({ok:true,store_id:storeId,by,value,match_status:"not_found",products:[]});
+      if(by==="design" && !/^[A-Z]$/.test(candidate))
+        return NextResponse.json({ok:true,store_id:storeId,by,value,match_status:"not_found",products:[]});
+      codes=codes.filter(c=>by==="code"?c.code===candidate:c.design_code===candidate);
+      matchStatus=codes.length?"matched":"not_found";
+    }else{
+      const field=by==="brand"?"brand":"color";
+      const resolution=resolveCatalogSearch(field,value,codes.map(c=>field==="brand"?c.brand_name:c.color_name));
+      matchStatus=resolution.status;
+      quality=resolution.quality;
+      suggestions=resolution.suggestions;
+      if(matchStatus!=="matched")
+        return NextResponse.json({ok:true,store_id:storeId,by,value,
+          match_status:matchStatus,suggestions,products:[]});
+      const matching=new Set(resolution.values);
+      codes=codes.filter(c=>matching.has(field==="brand"?c.brand_name:c.color_name));
+    }
+    if(!codes.length)
+      return NextResponse.json({ok:true,store_id:storeId,by,value,match_status:"not_found",products:[]});
+    const productById=new Map(storeProducts.map(p=>[p.id,p]));
+    const matchedIds=codes.map(c=>c.product_id);
+    const {data:variants,error:variantError}=await supabaseAdmin.from("product_variants")
+      .select("product_id,color,size,sale_price,stock_quantity,is_active,image_url")
+      .eq("store_id",storeId).in("product_id",matchedIds).limit(10001);
+    if(variantError) throw variantError;
+    if((variants||[]).length>10000)
+      return NextResponse.json({ok:false,error:"TOO_MANY_VARIANTS"},{status:413});
     const variantsById = new Map<string,typeof variants>();
     for(const row of variants||[]) {
       if(!variantsById.has(row.product_id)) variantsById.set(row.product_id,[]);
@@ -86,7 +111,8 @@ export async function GET(request: Request) {
         })),
       }];
     });
-    return NextResponse.json({ok:true,store_id:storeId,by,value,products:result});
+    return NextResponse.json({ok:true,store_id:storeId,by,value,
+      match_status:matchStatus,match_quality:quality,suggestions,products:result});
   } catch(error) {
     console.error("Catalog lookup:",error);
     return NextResponse.json({ok:false,error:"CATALOG_LOOKUP_FAILED"},{status:500});

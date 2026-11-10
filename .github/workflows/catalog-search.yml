@@ -1,0 +1,27 @@
+name: Catalog search regression
+on:
+  pull_request:
+    paths:
+      - 'lib/catalogSearch.ts'
+      - 'app/api/agent/catalog-query/route.ts'
+      - 'scripts/check-catalog-search.mjs'
+      - '.github/workflows/catalog-search.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'lib/catalogSearch.ts'
+      - 'app/api/agent/catalog-query/route.ts'
+      - 'scripts/check-catalog-search.mjs'
+      - '.github/workflows/catalog-search.yml'
+jobs:
+  search-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - run: npm ci --ignore-scripts
+      - run: node scripts/check-catalog-search.mjs
