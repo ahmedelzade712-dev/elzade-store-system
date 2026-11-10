@@ -524,206 +524,59 @@ export default function ProductsPage() {
 
   async function handleEditProduct() {
     if (!editItem || savingEdit) return;
-
-    const isPajama = true;
-    const normalizedAgentCode = editAgentCode.trim().toUpperCase();
-    const effectiveDesignCode = isPajama && normalizedAgentCode
-      ? normalizedAgentCode.charAt(0) : editDesignCode.trim();
-    if (isPajama && editCodeLoading) { setMessage("يرجى انتظار تحميل الكود المقترح"); return; }
-    if (isPajama && normalizedAgentCode && (
-      !/^[A-Z][0-9]{2,}$/.test(normalizedAgentCode) || !editBrandName.trim()
-    )) {
-      setMessage("كود Adora يجب أن يكون مثل D01، مع كتابة اسم البراند");
+    const normalizedDesign = (editAgentCode || editDesignCode).trim().toUpperCase().charAt(0);
+    if (!/^[A-Z]$/.test(normalizedDesign) || !editBrandName.trim() ||
+        !editStoreId || !editName.trim() || !editType || !editColor.trim() ||
+        !editCostPrice || !editSalePrice || editCodeLoading) {
+      setMessage("أكمل المتجر، حرف التصميم، البراند، الاسم، نوع المنتج، اللون والسعر وانتظر ظهور الكود");
       return;
     }
-    if (isPajama && editingAgentCodeId && !normalizedAgentCode) {
-      setMessage("لا يمكن حذف ارتباط الكود بهذه الطريقة؛ يمكنك إيقافه من بيانات المنتج لاحقًا");
-      return;
-    }
-    if (
-      !editStoreId ||
-      !effectiveDesignCode ||
-      !editName.trim() ||
-
-      !editType ||
-      !editColor ||
-      !editCostPrice ||
-      !editSalePrice
-    ) {
-      setMessage(
-        "يجب تعبئة المتجر، كود التصميم، الاسم، وصف المنتج، العلامات المميزة للـAI، النوع، اللون، التكلفة، وسعر البيع"
-      );
-      return;
-    }
-
     setSavingEdit(true);
-    setMessage("جاري حفظ بيانات المنتج...");
-    if (isPajama && normalizedAgentCode) {
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (!session) throw new Error("تعديل كود Adora يتطلب تسجيل الدخول بحساب المدير");
-        const response = await fetch("/api/agent/product-codes", {
-          headers: { Authorization: `Bearer ${session.access_token}` },
-          cache: "no-store",
-        });
-        const result = await response.json();
-        if (!response.ok || !result.ok) throw new Error(result.error || "تعذر التحقق من كود Adora");
-        const { data: { user } } = await supabase.auth.getUser();
-        const { data: profile } = await supabase.from("profiles")
-          .select("role,is_active").eq("id", user?.id || "").single();
-        if (profile?.role !== "admin" || !profile.is_active) {
-          throw new Error("تعديل كود Adora يتطلب صلاحية المدير");
-        }
-        if ((result.codes || []).some((c: { id: string; code: string }) =>
-          c.code === normalizedAgentCode && c.id !== editingAgentCodeId
-        )) throw new Error("هذا الكود مستخدم بالفعل لمنتج آخر");
-        if ((result.codes || []).some((c: { id: string; design_code: string; brand_name: string }) =>
-          c.id !== editingAgentCodeId && c.design_code === normalizedAgentCode.charAt(0) &&
-          c.brand_name.trim().toLocaleLowerCase() !== editBrandName.trim().toLocaleLowerCase()
-        )) throw new Error("هذا التصميم مرتبط ببراند مختلف");
-      } catch (e) {
-        setMessage(e instanceof Error ? e.message : "فشل فحص الكود");
-        setSavingEdit(false);
-        return;
-      }
-    }
-
+    setMessage("جاري حفظ المنتج والكود معًا...");
+    let uploadedFileName = "";
     try {
-      let finalImageUrl =
-        editItem.image || editItem.product?.main_image_url || "";
-
+      let finalImageUrl = editItem.image || editItem.product?.main_image_url || "";
       if (editImageFile) {
-        const fileExt = editImageFile.name.split(".").pop();
-        const safeCode = (editSku || editDesignCode || editItem.product_id)
-          .replace(/[^a-zA-Z0-9_-]/g, "-");
-        const fileName = `${Date.now()}-${safeCode}.${fileExt}`;
-
-        const { error: uploadError } = await supabase.storage
-          .from("product-images")
-          .upload(fileName, editImageFile);
-
-        if (uploadError) {
-          throw new Error("خطأ في رفع الصورة الجديدة: " + uploadError.message);
-        }
-
-        const { data: imageData } = supabase.storage
-          .from("product-images")
-          .getPublicUrl(fileName);
-
-        finalImageUrl = imageData.publicUrl;
+        const ext = editImageFile.name.split(".").pop()?.toLowerCase() || "jpg";
+        uploadedFileName = `${Date.now()}-${editItem.product_id}.${ext}`;
+        const {error:uploadError} = await supabase.storage
+          .from("product-images").upload(uploadedFileName,editImageFile,{upsert:false});
+        if (uploadError) throw new Error("فشل رفع الصورة: "+uploadError.message);
+        finalImageUrl = supabase.storage.from("product-images")
+          .getPublicUrl(uploadedFileName).data.publicUrl;
       }
-
-      const { data: updatedProduct, error: productError } = await supabase
-        .from("products")
-        .update({
-          store_id: editStoreId,
-          sku: editSku.trim() || null,
-          design_code: effectiveDesignCode,
-          name: editName.trim(),
-          model: editModel.trim() || null,
-          description: editDescription.trim(),
-          visual_features: editVisualFeatures.trim(),
-          product_type: editType,
-          fabric: editFabric.trim() || null,
-          main_image_url: finalImageUrl || null,
-          default_cost_price: Number(editCostPrice),
-          default_sale_price: Number(editSalePrice),
-        })
-        .eq("id", editItem.product_id)
-        .select("id, design_code, description, name")
-        .single();
-
-      if (productError || !updatedProduct) {
-        throw new Error(
-          "خطأ في حفظ بيانات المنتج: " +
-            (productError?.message || "لم يتم تحديث المنتج")
-        );
-      }
-
-      // Update the current color variants' common data only.
-      // Stock quantities are intentionally NOT touched here.
-      const currentVariantIds = (editItem.variant_ids || []).filter(Boolean);
-
-      if (currentVariantIds.length > 0) {
-        const { error: variantsError } = await supabase
-          .from("product_variants")
-          .update({
-            store_id: editStoreId,
-            color: editColor,
-            cost_price: Number(editCostPrice),
-            sale_price: Number(editSalePrice),
-            image_url: finalImageUrl || null,
-          })
-          .in("id", currentVariantIds);
-
-        if (variantsError) {
-          throw new Error(
-            "تم حفظ بيانات المنتج، لكن حدث خطأ في تحديث بيانات اللون/السعر: " +
-              variantsError.message
-          );
-        }
-      }
-
-      // Verify the exact fields the user edited actually persisted.
-      const { data: verifyProduct, error: verifyError } = await supabase
-        .from("products")
-        .select("id, design_code, description, visual_features, name, model, product_type, fabric")
-        .eq("id", editItem.product_id)
-        .single();
-
-      if (verifyError || !verifyProduct) {
-        throw new Error(
-          "تم إرسال التعديل لكن تعذر التحقق من حفظه: " +
-            (verifyError?.message || "تعذر قراءة المنتج")
-        );
-      }
-
-      if (
-        String(verifyProduct.design_code || "") !== effectiveDesignCode ||
-        String(verifyProduct.description || "") !== editDescription.trim() ||
-        String(verifyProduct.visual_features || "") !== editVisualFeatures.trim()
-      ) {
-        throw new Error(
-          "لم يتم حفظ كود التصميم أو وصف المنتج أو العلامات المميزة للـAI كما هو مكتوب. أعد المحاولة."
-        );
-      }
-
-      if (isPajama && normalizedAgentCode) {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (!session) throw new Error("تم حفظ المنتج لكن تعذر ربط كود Adora لأن الجلسة انتهت");
-        const response = await fetch("/api/agent/product-codes", {
-          method: editingAgentCodeId ? "PATCH" : "POST",
-          headers: {
-            Authorization: `Bearer ${session.access_token}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            id: editingAgentCodeId || undefined,
-            code: normalizedAgentCode,
-            design_code: normalizedAgentCode.charAt(0),
-            brand_name: editBrandName.trim(),
-            color_name: editColor,
-            product_id: editItem.product_id,
-            is_active: editAgentCodeActive,
-          }),
-        });
-        const codeResult = await response.json();
-        if (!response.ok || !codeResult.ok) {
-          throw new Error(
-            "تم حفظ بيانات المنتج بالفعل، لكن ربط كود Adora لم ينجح. " +
-            "لا تكرر تعديل البيانات؛ راجع الكود وحاول حفظه مرة أخرى. السبب: " +
-            (codeResult.error || "خطأ غير معروف")
-          );
-        }
-      }
-      setMessage("تم حفظ بيانات المنتج" + (normalizedAgentCode ? " وكود Adora" : "") + " بنجاح");
+      const {data:{session}} = await supabase.auth.getSession();
+      if (!session) throw new Error("انتهت جلسة تسجيل الدخول");
+      const response = await fetch("/api/agent/catalog-write",{
+        method:"POST",
+        headers:{Authorization:`Bearer ${session.access_token}`,"Content-Type":"application/json"},
+        body:JSON.stringify({action:"update",product:{
+          product_id:editItem.product_id,store_id:editStoreId,sku:editSku,
+          design_code:normalizedDesign,brand_name:editBrandName.trim(),
+          color:editColor.trim(),name:editName.trim(),model:editModel.trim(),
+          description:editDescription.trim(),visual_features:editVisualFeatures.trim(),
+          product_type:editType,fabric:editFabric.trim(),image_url:finalImageUrl,
+          cost_price:Number(editCostPrice),sale_price:Number(editSalePrice),
+          is_active:editAgentCodeActive,
+        }}),
+      });
+      const result = await response.json();
+      if (!response.ok || !result.ok) throw new Error(
+        result.error === "CATALOG_MIGRATION_REQUIRED"
+          ? "يجب تركيب ترحيل قاعدة البيانات أولًا"
+          : result.error || "تعذر حفظ تعديل المنتج"
+      );
+      uploadedFileName = "";
       setEditImageFile(null);
-      setEditPreview(finalImageUrl || "");
-      await loadData();
+      setEditPreview(finalImageUrl);
       setEditItem(null);
-    } catch (error: any) {
-      // Do NOT call loadData here because loadData clears the error message.
-      setMessage(error?.message || "حدث خطأ أثناء حفظ بيانات المنتج");
+      await loadData();
+      setMessage(`تم تحديث بيانات المنتج وكود ${result.code} معًا دون تغيير كميات المخزون`);
+    } catch(error) {
+      if (uploadedFileName) {
+        await supabase.storage.from("product-images").remove([uploadedFileName]);
+      }
+      setMessage(error instanceof Error ? error.message : "فشل تحديث المنتج");
     } finally {
       setSavingEdit(false);
     }
