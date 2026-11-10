@@ -61,6 +61,8 @@ export default function NewProductPage() {
   const [storeId, setStoreId] = useState("");
   const [sku, setSku] = useState("");
   const [designCode, setDesignCode] = useState("");
+  const [agentCode, setAgentCode] = useState("");
+  const [brandName, setBrandName] = useState("");
   const [name, setName] = useState("");
   const [model, setModel] = useState("");
   const [description, setDescription] = useState("");
@@ -126,6 +128,8 @@ export default function NewProductPage() {
   function resetForm() {
     setSku("");
     setDesignCode("");
+    setAgentCode("");
+    setBrandName("");
     setName("");
     setModel("");
     setDescription("");
@@ -152,9 +156,17 @@ export default function NewProductPage() {
 
     setMessage("");
 
+    const isPajama = productType === "بيجامة";
+    const normalizedAgentCode = agentCode.trim().toUpperCase();
+    const effectiveDesignCode = isPajama ? normalizedAgentCode.charAt(0) : designCode.trim();
+    if (isPajama && (!/^[A-Z][0-9]{2,}$/.test(normalizedAgentCode) || !brandName.trim())) {
+      setMessage("للبيجامات يلزم كود Adora مثل D01 واسم البراند");
+      return;
+    }
+
     const requiredMissing =
       !storeId ||
-      !designCode.trim() ||
+      !effectiveDesignCode ||
       !name.trim() ||
       !productType ||
       !color ||
@@ -224,7 +236,7 @@ export default function NewProductPage() {
         .insert({
           store_id: storeId,
           sku: finalSku,
-          design_code: designCode.trim(),
+          design_code: effectiveDesignCode,
           name: name.trim(),
           model: model.trim() || null,
           description: description.trim(),
@@ -265,7 +277,42 @@ export default function NewProductPage() {
         throw new Error("خطأ في حفظ المقاسات: " + variantError.message);
       }
 
-      setMessage("تم حفظ المنتج وكل المقاسات في المخزون بنجاح");
+      if (isPajama) {
+        try {
+          const { data: { session } } = await supabase.auth.getSession();
+          if (!session) throw new Error("انتهت جلسة تسجيل الدخول");
+          const response = await fetch("/api/agent/product-codes", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${session.access_token}`,
+            },
+            body: JSON.stringify({
+              code: normalizedAgentCode,
+              design_code: effectiveDesignCode,
+              brand_name: brandName.trim(),
+              color_name: color,
+              product_id: product.id,
+              is_active: true,
+            }),
+          });
+          const codeResult = await response.json();
+          if (!response.ok || !codeResult.ok) {
+            throw new Error(codeResult.error || "فشل تسجيل كود Adora");
+          }
+        } catch (codeError) {
+          setMessage(
+            `تم حفظ المنتج والمقاسات بالفعل في ERP، لكن لم يُربط كود Adora (${normalizedAgentCode}). ` +
+            "لا تُعد إنشاء المنتج. افتح صفحة أكواد Adora واربط الكود بالمنتج الموجود. السبب: " +
+            (codeError instanceof Error ? codeError.message : "خطأ غير معروف")
+          );
+          return;
+        }
+      }
+
+      setMessage(isPajama
+        ? `تم حفظ المنتج والمقاسات وربط كود Adora ${normalizedAgentCode} بنجاح`
+        : "تم حفظ المنتج وكل المقاسات في المخزون بنجاح");
       resetForm();
     } catch (error: any) {
       if (createdProductId) {
@@ -332,6 +379,28 @@ export default function NewProductPage() {
               />
             </label>
 
+            {productType === "بيجامة" ? (
+              <>
+                <label className="grid gap-2">
+                  <span className="text-sm text-neutral-300">كود Adora (التصميم واللون) *</span>
+                  <input className="rounded-xl bg-neutral-800 p-4" value={agentCode}
+                    onChange={(e) => setAgentCode(e.target.value.toUpperCase())}
+                    placeholder="مثل D01" required dir="ltr" maxLength={12} />
+                  <span className="text-xs text-neutral-500">حرف التصميم ثم رقم اللون؛ مثال D01</span>
+                </label>
+                <label className="grid gap-2">
+                  <span className="text-sm text-neutral-300">اسم البراند *</span>
+                  <input className="rounded-xl bg-neutral-800 p-4" value={brandName}
+                    onChange={(e) => setBrandName(e.target.value)}
+                    placeholder="Dior / Fendi / Victoria" required />
+                </label>
+                <label className="grid gap-2">
+                  <span className="text-sm text-neutral-300">كود التصميم (تلقائي)</span>
+                  <input className="rounded-xl bg-neutral-800 p-4 text-neutral-400"
+                    value={agentCode.trim().toUpperCase().charAt(0)} disabled dir="ltr" />
+                </label>
+              </>
+            ) : (
             <label className="grid gap-2">
               <span className="text-sm text-neutral-300">كود التصميم *</span>
               <input
@@ -345,6 +414,7 @@ export default function NewProductPage() {
                 جميع ألوان نفس التصميم يجب أن تحمل نفس الكود.
               </span>
             </label>
+            )}
 
             <label className="grid gap-2">
               <span className="text-sm text-neutral-300">اسم المنتج *</span>
