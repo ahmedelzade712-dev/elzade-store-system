@@ -25,9 +25,30 @@ function errorResponse(error: unknown) {
   return NextResponse.json({ ok: false, error: safeMessage }, { status });
 }
 
+function nextDesignCode(codes: string[], design: string): string {
+  const used = new Set(codes);
+  for (let i = 1; i <= 999999; i++) {
+    const candidate = design + String(i).padStart(2, "0");
+    if (!used.has(candidate)) return candidate;
+  }
+  throw new Error("لا توجد أكواد متاحة لهذا التصميم");
+}
+
 export async function GET(request: Request) {
   try {
     const profile = await requireUser(request);
+    const designQuery = new URL(request.url).searchParams.get("next_design")?.trim().toUpperCase();
+    if (designQuery) {
+      if (!/^[A-Z]$/.test(designQuery)) throw new Error("التصميم يجب أن يكون حرفًا إنجليزيًا واحدًا");
+      const { data: existing, error: existingError } = await supabaseAdmin
+        .from("agent_product_codes").select("code,brand_name")
+        .eq("design_code", designQuery).order("code").limit(10000);
+      if (existingError) throw existingError;
+      return NextResponse.json({
+        ok: true, suggested_code: nextDesignCode((existing || []).map(row => row.code), designQuery),
+        existing_brand: existing?.[0]?.brand_name || null,
+      });
+    }
     const { data: allStores, error: storesError } = await supabaseAdmin
       .from("stores").select("id,name").order("name");
     if (storesError) throw storesError;
@@ -78,15 +99,20 @@ async function save(request: Request, update: boolean) {
     await requireUser(request, true);
     const body = await request.json();
     const id = String(body.id || "").trim();
-    const code = String(body.code || "").trim().toUpperCase();
+    let code = String(body.code || "").trim().toUpperCase();
+    const autoCode = !update && body.auto_code === true;
     const designCode = String(body.design_code || "").trim().toUpperCase();
     const brandName = String(body.brand_name || "").trim();
     const colorName = String(body.color_name || "").trim();
     const productId = String(body.product_id || "").trim();
     const isActive = body.is_active !== false;
     if (update && !id) throw new Error("بيانات السجل غير مكتملة");
-    if (!/^[A-Z][0-9]{2,}$/.test(code)) throw new Error("الكود يجب أن يكون مثل D01 أو R02");
-    if (!/^[A-Z]$/.test(designCode) || code[0] !== designCode) {
+    if (autoCode) {
+      if (!/^[A-Z]$/.test(designCode)) throw new Error("التصميم يجب أن يكون حرفًا واحدًا");
+    } else if (!/^[A-Z][0-9]{2,}$/.test(code)) {
+      throw new Error("الكود يجب أن يكون مثل D01 أو R02");
+    }
+    if (!/^[A-Z]$/.test(designCode) || (!autoCode && code[0] !== designCode)) {
       throw new Error("التصميم يجب أن يطابق الحرف الأول في الكود");
     }
     if (!brandName || !colorName || !productId) throw new Error("بيانات البراند واللون والمنتج مطلوبة");
@@ -112,6 +138,36 @@ async function save(request: Request, update: boolean) {
     if ((sameDesign || []).some(row =>
       row.id !== id && row.brand_name.trim().toLocaleLowerCase() !== brandName.toLocaleLowerCase())) {
       throw new Error("التصميم مستخدم بالفعل مع براند مختلف");
+    }
+    const { data: sameColor, error: colorError } = await supabaseAdmin
+      .from("agent_product_codes")
+      .select("id,color_name,product_id").eq("design_code", designCode);
+    if (colorError) throw colorError;
+    if ((sameColor || []).some(row =>
+      row.id !== id && row.color_name.trim().toLocaleLowerCase() === colorName.toLocaleLowerCase()
+    )) throw new Error("هذا اللون مسجل بالفعل للتصميم نفسه");
+
+    if (autoCode) {
+      // The unique code index is the final concurrency guard. Retry after a collision.
+      for (let attempt = 0; attempt < 8; attempt++) {
+        const { data: used, error: usedError } = await supabaseAdmin
+          .from("agent_product_codes").select("code")
+          .eq("design_code", designCode).limit(10000);
+        if (usedError) throw usedError;
+        code = nextDesignCode((used || []).map(row => row.code), designCode);
+        const { data, error } = await supabaseAdmin.from("agent_product_codes").insert({
+          code, design_code: designCode, brand_name: brandName,
+          color_name: colorName, product_id: productId, is_active: isActive,
+        }).select("id,code").single();
+        if (!error) return NextResponse.json({ ok: true, code: data });
+        if (error.code !== "23505") throw error;
+        // A different constraint might have failed: check for an existing code on this product.
+        const { data: linked, error: linkedError } = await supabaseAdmin
+          .from("agent_product_codes").select("code").eq("product_id", productId).maybeSingle();
+        if (linkedError) throw linkedError;
+        if (linked) throw new Error("المنتج مرتبط بالفعل بالكود " + linked.code);
+      }
+      throw new Error("تعذر تخصيص رقم للكود بسبب طلبات متزامنة، أعد المحاولة");
     }
     const payload = {
       code, design_code: designCode, brand_name: brandName,

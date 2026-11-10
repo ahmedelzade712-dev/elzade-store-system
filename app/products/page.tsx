@@ -81,6 +81,8 @@ export default function ProductsPage() {
   const [editSku, setEditSku] = useState("");
   const [editDesignCode, setEditDesignCode] = useState("");
   const [editAgentCode, setEditAgentCode] = useState("");
+  const [editCodeLoading, setEditCodeLoading] = useState(false);
+  const [editCodeHint, setEditCodeHint] = useState("");
   const [editBrandName, setEditBrandName] = useState("");
   const [editAgentCodeActive, setEditAgentCodeActive] = useState(true);
   const [editingAgentCodeId, setEditingAgentCodeId] = useState("");
@@ -305,6 +307,7 @@ export default function ProductsPage() {
     const codeLink = agentCodes.find((c) => c.product_id === item.product_id);
     setEditingAgentCodeId(codeLink?.id || "");
     setEditAgentCode(codeLink?.code || "");
+    setEditCodeHint("");
     setEditBrandName(codeLink?.brand_name || "");
     setEditAgentCodeActive(codeLink?.is_active !== false);
     setEditDesignCode(codeLink?.code
@@ -328,6 +331,36 @@ export default function ProductsPage() {
       }))
     );
     setMessage("");
+  }
+
+  async function chooseEditDesign(letter: string) {
+    const design = letter.toUpperCase().replace(/[^A-Z]/g, "").slice(0, 1);
+    setEditDesignCode(design);
+    setEditAgentCode("");
+    setEditCodeHint("");
+    if (!design) return;
+    setEditCodeLoading(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error("انتهت جلسة تسجيل الدخول");
+      const response = await fetch("/api/agent/product-codes?next_design=" + design, {
+        headers: { Authorization: `Bearer ${session.access_token}` }, cache: "no-store",
+      });
+      const result = await response.json();
+      if (!response.ok || !result.ok) throw new Error(result.error || "تعذر اقتراح الكود");
+      setEditAgentCode(result.suggested_code);
+      if (result.existing_brand) {
+        setEditBrandName(result.existing_brand);
+        setEditCodeHint("تم تحديد البراند من التصميم المسجل.");
+      } else {
+        setEditBrandName("");
+        setEditCodeHint("تصميم جديد؛ أدخل اسم البراند.");
+      }
+    } catch (error) {
+      setEditCodeHint(error instanceof Error ? error.message : "تعذر اقتراح الكود");
+    } finally {
+      setEditCodeLoading(false);
+    }
   }
 
   function updateEditSizeQuantity(size: string, quantity: string) {
@@ -496,6 +529,7 @@ export default function ProductsPage() {
     const normalizedAgentCode = editAgentCode.trim().toUpperCase();
     const effectiveDesignCode = isPajama && normalizedAgentCode
       ? normalizedAgentCode.charAt(0) : editDesignCode.trim();
+    if (isPajama && editCodeLoading) { setMessage("يرجى انتظار تحميل الكود المقترح"); return; }
     if (isPajama && normalizedAgentCode && (
       !/^[A-Z][0-9]{2,}$/.test(normalizedAgentCode) || !editBrandName.trim()
     )) {
@@ -1048,10 +1082,18 @@ export default function ProductsPage() {
 
               {editType === "بيجامة" ? (
                 <div className="grid gap-3">
-                  <label className="text-sm text-neutral-300">كود Adora (التصميم واللون)
-                    <input className="mt-2 w-full rounded-xl bg-neutral-800 p-4"
-                      placeholder="مثال D01" dir="ltr" value={editAgentCode}
-                      onChange={(e) => setEditAgentCode(e.target.value.toUpperCase())} />
+                  <label className="text-sm text-neutral-300">حرف التصميم
+                    <input className="mt-2 w-full rounded-xl bg-neutral-800 p-4 uppercase"
+                      maxLength={1} dir="ltr" placeholder="D" value={editDesignCode}
+                      onChange={(e) => { void chooseEditDesign(e.target.value); }} />
+                  </label>
+                  <label className="text-sm text-neutral-300">كود البيجامة
+                    <input className="mt-2 w-full rounded-xl bg-neutral-800 p-4 text-neutral-300"
+                      dir="ltr" value={editCodeLoading ? "..." : editAgentCode} disabled
+                      placeholder="يُقترح تلقائيًا" />
+                    <span className="mt-1 block text-xs text-neutral-400">
+                      {editCodeHint || (editingAgentCodeId ? "الكود الحالي محفوظ؛ تغيير الحرف يقترح كودًا جديدًا." : "اكتب حرف التصميم ليُقترح الكود.")}
+                    </span>
                   </label>
                   <label className="text-sm text-neutral-300">اسم البراند
                     <input className="mt-2 w-full rounded-xl bg-neutral-800 p-4"
@@ -1063,9 +1105,6 @@ export default function ProductsPage() {
                       onChange={(e) => setEditAgentCodeActive(e.target.checked)} />
                     الكود نشط للـAgent
                   </label>
-                  <p className="text-xs text-neutral-400">
-                    كود التصميم: {editAgentCode ? editAgentCode.charAt(0).toUpperCase() : editDesignCode || "-"}
-                  </p>
                 </div>
               ) : (
               <div className="grid gap-2">
@@ -1122,18 +1161,16 @@ export default function ProductsPage() {
                 ))}
               </select>
 
-              <select
-                className="rounded-xl bg-neutral-800 p-4"
-                value={editColor}
-                onChange={(e) => setEditColor(e.target.value)}
-              >
-                <option value="">اختر اللون</option>
-                {COLORS.map((colorOption) => (
-                  <option key={colorOption} value={colorOption}>
-                    {colorOption}
-                  </option>
-                ))}
-              </select>
+              <label className="grid gap-2 text-sm text-neutral-300">
+                اللون — اختر أو اكتب لونًا جديدًا
+                <input className="rounded-xl bg-neutral-800 p-4"
+                  list="edit-product-colors" value={editColor}
+                  onChange={(e) => setEditColor(e.target.value)} />
+                <datalist id="edit-product-colors">
+                  {[...new Set([...COLORS, ...variants.map((v) => String(v.color || "").trim()).filter(Boolean)])]
+                    .map((c) => <option key={c} value={c} />)}
+                </datalist>
+              </label>
 
               <input
                 className="rounded-xl bg-neutral-800 p-4"
