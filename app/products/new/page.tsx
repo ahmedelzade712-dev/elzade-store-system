@@ -332,7 +332,7 @@ export default function NewProductPage() {
         } catch (codeError) {
           setMessage(
             `تم حفظ المنتج والمقاسات بالفعل في ERP، لكن لم يُربط كود Adora (${normalizedAgentCode}). ` +
-            "لا تُعد إنشاء المنتج. افتح صفحة أكواد Adora واربط الكود بالمنتج الموجود. السبب: " +
+            "لا تُعد إنشاء المنتج. افتح صفحة المنتجات ثم اضغط تعديل على المنتج الموجود لإكمال ربط الكود. السبب: " +
             (codeError instanceof Error ? codeError.message : "خطأ غير معروف")
           );
           return;
