@@ -227,3 +227,15 @@ GRANT EXECUTE ON FUNCTION public.erp_update_product_with_code(jsonb) TO service_
 
 -- Refresh PostgREST's function schema cache after the new RPCs are installed.
 NOTIFY pgrst, 'reload schema';
+
+-- Final read-only confirmation printed by the Supabase SQL Editor.
+SELECT
+  to_regprocedure('public.erp_create_product_with_code(jsonb)') IS NOT NULL AS create_function_ready,
+  to_regprocedure('public.erp_update_product_with_code(jsonb)') IS NOT NULL AS update_function_ready,
+  to_regprocedure('public.erp_catalog_integrity_report()') IS NOT NULL AS audit_function_ready,
+  EXISTS (
+    SELECT 1 FROM pg_indexes
+    WHERE schemaname='public' AND tablename='agent_product_codes'
+      AND indexname='agent_product_codes_design_color_unique'
+  ) AS unique_design_color_ready;
+
