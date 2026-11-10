@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { normalizeSearchText, selectCatalogNames } from "@/lib/catalogSearch";
 
 const allowed = new Set(["code","design","brand","color"]);
-const norm = (v:string) => v.trim().toLocaleLowerCase();
 
 async function authorize(request: Request) {
   const serviceKey = process.env.AGENT_INTERNAL_API_KEY;
@@ -36,21 +36,53 @@ export async function GET(request: Request) {
     if (auth.role !== "admin" && auth.role !== "internal" && auth.store_id !== storeId) {
       return NextResponse.json({ok:false,error:"FORBIDDEN"},{status:403});
     }
-    // First filter by catalog identity; no pictures, secret costs or unrelated stores are exposed.
-    let catalogQuery = supabaseAdmin.from("agent_product_codes")
+    // Resolve store first, before fuzzy name matching: no data can leak across stores.
+    const {data:storeProducts,error:storeProductsError} = await supabaseAdmin
+      .from("products").select("id")
+      .eq("store_id",storeId).eq("is_active",true).limit(1001);
+    if(storeProductsError) throw storeProductsError;
+    if((storeProducts||[]).length > 1000) return NextResponse.json({
+      ok:false,error:"TOO_MANY_STORE_PRODUCTS"
+    },{status:413});
+    const storeIds=(storeProducts||[]).map(p=>p.id);
+    if(!storeIds.length) return NextResponse.json({
+      ok:true,store_id:storeId,by,value,match_status:"not_found",products:[]
+    });
+    const {data:codes,error:codesError} = await supabaseAdmin
+      .from("agent_product_codes")
       .select("product_id,code,design_code,brand_name,color_name,is_active")
-      .eq("is_active",true).limit(1001);
-    if (by === "code") catalogQuery = catalogQuery.eq("code",value.toUpperCase());
-    if (by === "design") catalogQuery = catalogQuery.eq("design_code",value.toUpperCase());
-    if (by === "brand") catalogQuery = catalogQuery.ilike("brand_name",value);
-    if (by === "color") catalogQuery = catalogQuery.ilike("color_name",value);
-    const {data:codes,error:codesError} = await catalogQuery;
-    if (codesError) throw codesError;
-    if (!codes?.length) return NextResponse.json({ok:true,store_id:storeId,products:[]});
-    if (codes.length > 1000) {
-      return NextResponse.json({ok:false,error:"TOO_MANY_CATALOG_MATCHES"},{status:413});
+      .eq("is_active",true).in("product_id",storeIds).limit(1001);
+    if(codesError) throw codesError;
+    if((codes||[]).length>1000) return NextResponse.json({
+      ok:false,error:"TOO_MANY_CATALOG_MATCHES"
+    },{status:413});
+    let matchStatus:"matched"|"ambiguous"|"not_found"="not_found";
+    let confidence:"exact"|"alias"|"fuzzy"|null=null;
+    let suggestions:string[]=[];
+    let filtered = codes||[];
+    if(by==="code") {
+      filtered = filtered.filter(c=>c.code.toUpperCase()===value.toUpperCase());
+      if(filtered.length) {matchStatus="matched";confidence="exact";}
+    } else if(by==="design") {
+      filtered = filtered.filter(c=>c.design_code.toUpperCase()===value.toUpperCase());
+      if(filtered.length) {matchStatus="matched";confidence="exact";}
+    } else {
+      const field = by === "brand" ? "brand_name" : "color_name";
+      const selection = selectCatalogNames(by as "brand"|"color",value,
+        filtered.map(c=>c[field]));
+      matchStatus=selection.status;
+      confidence=selection.confidence;
+      suggestions=selection.suggestions;
+      const names=new Set(selection.matches.map(normalizeSearchText));
+      filtered=selection.status==="matched"
+        ?filtered.filter(c=>names.has(normalizeSearchText(c[field])))
+        :[];
     }
-    const ids=codes.map(c=>c.product_id);
+    if(!filtered.length) return NextResponse.json({
+      ok:true,store_id:storeId,by,value,match_status:matchStatus,
+      confidence,suggestions,products:[]
+    });
+    const ids=filtered.map(c=>c.product_id);
 
     const [{data:products,error:productError},{data:variants,error:variantError}] = await Promise.all([
       supabaseAdmin.from("products")
@@ -69,7 +101,7 @@ export async function GET(request: Request) {
       if(!variantsById.has(row.product_id)) variantsById.set(row.product_id,[]);
       variantsById.get(row.product_id)!.push(row);
     }
-    const result = codes.flatMap(c=>{
+    const result = filtered.flatMap(c=>{
       const p=productById.get(c.product_id);
       if(!p) return [];
       const sizes=(variantsById.get(c.product_id)||[]).filter(v=>v.is_active!==false);
@@ -86,7 +118,7 @@ export async function GET(request: Request) {
         })),
       }];
     });
-    return NextResponse.json({ok:true,store_id:storeId,by,value,products:result});
+    return NextResponse.json({ok:true,store_id:storeId,by,value,match_status:matchStatus,confidence,suggestions,products:result});
   } catch(error) {
     console.error("Catalog lookup:",error);
     return NextResponse.json({ok:false,error:"CATALOG_LOOKUP_FAILED"},{status:500});
