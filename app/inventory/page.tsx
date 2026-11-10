@@ -26,6 +26,7 @@ export default function InventoryPage() {
   }
 
   const [items, setItems] = useState<any[]>([]);
+  const [agentCodeByProduct, setAgentCodeByProduct] = useState<Record<string, string>>({});
   const [stores, setStores] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
@@ -41,7 +42,29 @@ export default function InventoryPage() {
   useEffect(() => {
     loadInventory();
     loadStores();
+    loadAgentCodes();
   }, []);
+
+  async function loadAgentCodes() {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return;
+    try {
+      const response = await fetch("/api/agent/product-codes", {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+        cache: "no-store",
+      });
+      if (!response.ok) return;
+      const data = await response.json();
+      if (!data.ok) return;
+      const map: Record<string, string> = {};
+      for (const item of data.codes || []) {
+        map[item.product_id] = item.code;
+      }
+      setAgentCodeByProduct(map);
+    } catch {
+      // The inventory itself remains accessible if the optional catalog is unavailable.
+    }
+  }
 
   async function loadStores() {
     const { data } = await supabase
@@ -90,6 +113,7 @@ export default function InventoryPage() {
 
         const text = `
           ${product?.sku || ""}
+          ${agentCodeByProduct[product?.id] || ""}
           ${product?.name || ""}
           ${product?.model || ""}
           ${product?.product_type || ""}
@@ -119,7 +143,7 @@ export default function InventoryPage() {
 
         return sortBySize(a, b);
       });
-  }, [items, search, storeFilter, typeFilter]);
+  }, [items, agentCodeByProduct, search, storeFilter, typeFilter]);
 
   const stats = useMemo(() => {
     const statsItems = storeFilter
@@ -344,7 +368,8 @@ export default function InventoryPage() {
           <thead className="bg-neutral-800 text-sm text-neutral-300">
             <tr>
               <th className="p-4">الصورة</th>
-              <th className="p-4">الكود</th>
+              <th className="p-4">الكود الداخلي</th>
+              <th className="p-4">كود Adora</th>
               <th className="p-4">المنتج</th>
               <th className="p-4">الموديل</th>
               <th className="p-4">النوع</th>
@@ -362,13 +387,13 @@ export default function InventoryPage() {
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={13} className="p-8 text-center text-neutral-400">
+                <td colSpan={14} className="p-8 text-center text-neutral-400">
                   جاري تحميل المخزون...
                 </td>
               </tr>
             ) : filteredItems.length === 0 ? (
               <tr>
-                <td colSpan={13} className="p-8 text-center text-neutral-400">
+                <td colSpan={14} className="p-8 text-center text-neutral-400">
                   لا توجد منتجات في المخزون
                 </td>
               </tr>
@@ -394,6 +419,7 @@ export default function InventoryPage() {
                     </td>
 
                     <td className="p-4">{product?.sku || "-"}</td>
+                    <td className="p-4 font-bold">{agentCodeByProduct[product?.id] || "-"}</td>
                     <td className="p-4 font-bold">{product?.name || "-"}</td>
                     <td className="p-4">{product?.model || "-"}</td>
                     <td className="p-4">{product?.product_type || "-"}</td>
