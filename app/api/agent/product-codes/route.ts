@@ -120,7 +120,7 @@ async function save(request: Request, update: boolean) {
     const { data: product, error: productError } = await supabaseAdmin
       .from("products").select("id,store_id,product_type").eq("id", productId).single();
     if (productError || !product) throw new Error("المنتج غير موجود في ERP");
-    if (product.product_type !== "بيجامة") throw new Error("المنتج المختار ليس بيجامة");
+    // Product codes work across all product types and stores.
 
     const { data: variants, error: variantsError } = await supabaseAdmin
       .from("product_variants").select("color,store_id").eq("product_id", productId);
