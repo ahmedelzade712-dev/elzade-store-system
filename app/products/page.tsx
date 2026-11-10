@@ -534,6 +534,8 @@ export default function ProductsPage() {
     setSavingEdit(true);
     setMessage("جاري حفظ المنتج والكود معًا...");
     let uploadedFileName = "";
+    let writeAttempted = false;
+    let writeRejected = false;
     try {
       let finalImageUrl = editItem.image || editItem.product?.main_image_url || "";
       if (editImageFile) {
@@ -547,6 +549,7 @@ export default function ProductsPage() {
       }
       const {data:{session}} = await supabase.auth.getSession();
       if (!session) throw new Error("انتهت جلسة تسجيل الدخول");
+      writeAttempted = true;
       const response = await fetch("/api/agent/catalog-write",{
         method:"POST",
         headers:{Authorization:`Bearer ${session.access_token}`,"Content-Type":"application/json"},
@@ -561,11 +564,14 @@ export default function ProductsPage() {
         }}),
       });
       const result = await response.json();
-      if (!response.ok || !result.ok) throw new Error(
+      if (!response.ok || !result.ok) {
+        writeRejected = true;
+        throw new Error(
         result.error === "CATALOG_MIGRATION_REQUIRED"
           ? "يجب تركيب ترحيل قاعدة البيانات أولًا"
           : result.error || "تعذر حفظ تعديل المنتج"
-      );
+        );
+      }
       uploadedFileName = "";
       setEditImageFile(null);
       setEditPreview(finalImageUrl);
@@ -573,7 +579,7 @@ export default function ProductsPage() {
       await loadData();
       setMessage(`تم تحديث بيانات المنتج وكود ${result.code} معًا دون تغيير كميات المخزون`);
     } catch(error) {
-      if (uploadedFileName) {
+      if (uploadedFileName && (!writeAttempted || writeRejected)) {
         await supabase.storage.from("product-images").remove([uploadedFileName]);
       }
       setMessage(error instanceof Error ? error.message : "فشل تحديث المنتج");
