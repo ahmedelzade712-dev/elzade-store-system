@@ -93,9 +93,10 @@ function candidateScore(query: string, candidate: string, kind: "brand"|"color")
   const qAliases=lookupAliases(kind,query);
   const cAliases=lookupAliases(kind,candidate);
   if([...qAliases].some(a=>cAliases.has(a))) return 95;
-  if(q.length>=3 && c.length>=3 && (c.startsWith(q+" ") || q.startsWith(c+" "))) return 83;
-  // Do not map a partial color word (e.g. blue) to every shade containing it.
-  if(kind==="color" && (c.includes(" ") || q.includes(" "))) return 0;
+  // Never collapse distinct color shades through prefix matching:
+  // "موف" and "موف هادي" are separate colors. Typos must match the full phrase.
+  if(kind==="brand" && q.length>=3 && c.length>=3 &&
+      (c.startsWith(q+" ") || q.startsWith(c+" "))) return 83;
   const short=Math.min(q.length,c.length);
   if(short < 4) return 0;
   const maximum = short >= 8 ? 2 : 1;
