@@ -224,3 +224,6 @@ REVOKE ALL ON FUNCTION public.erp_create_product_with_code(jsonb) FROM PUBLIC, a
 REVOKE ALL ON FUNCTION public.erp_update_product_with_code(jsonb) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.erp_create_product_with_code(jsonb) TO service_role;
 GRANT EXECUTE ON FUNCTION public.erp_update_product_with_code(jsonb) TO service_role;
+
+-- Refresh PostgREST's function schema cache after the new RPCs are installed.
+NOTIFY pgrst, 'reload schema';
