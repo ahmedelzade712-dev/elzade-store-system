@@ -78,7 +78,7 @@ export async function GET(request:Request){
       const result=await lookup("code",code.code);
       checkIds(label,result,[code]);
       const actual=result?.products.find(p=>p.product_id===code.product_id);
-      if(!actual)continue;
+      if(!actual)return;
       const dbVariants=variants.filter(v=>v.product_id===code.product_id && v.is_active!==false);
       const normalizedDb=dbVariants.map(v=>({
         size:v.size,color:v.color,price:roundMoney(v.sale_price),
