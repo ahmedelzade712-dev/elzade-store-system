@@ -4,9 +4,10 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "npm run test:catalog && next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test:catalog": "node scripts/test-catalog-search.cjs"
   },
   "dependencies": {
     "@react-pdf/renderer": "^4.3.1",
