@@ -172,6 +172,15 @@ export default function HomePage() {
         >
           المخزون
         </a>
+
+        {profile.role === "admin" && (
+          <a
+            href="/agent-product-codes"
+            className="rounded-2xl border border-neutral-800 bg-neutral-900 p-6 text-center font-bold"
+          >
+            أكواد بيجامات Adora
+          </a>
+        )}
       </div>
     </main>
   );
