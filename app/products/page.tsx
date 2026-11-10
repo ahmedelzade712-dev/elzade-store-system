@@ -699,6 +699,11 @@ export default function ProductsPage() {
   async function handleDeleteProduct() {
     if (!deleteItem) return;
 
+    if (agentCodes.some((c) => c.product_id === deleteItem.product_id)) {
+      setMessage("هذا المنتج مرتبط بكود Adora؛ لا يمكن حذفه لأن ذلك سيفصل الكود عن الصور القديمة. قم بإيقافه عن البيع بدلًا من الحذف.");
+      setDeleteItem(null);
+      return;
+    }
     setMessage("جاري حذف المنتج...");
 
     const { error: variantsError } = await supabase
