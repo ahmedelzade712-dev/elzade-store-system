@@ -62,6 +62,8 @@ export default function NewProductPage() {
   const [sku, setSku] = useState("");
   const [designCode, setDesignCode] = useState("");
   const [agentCode, setAgentCode] = useState("");
+  const [codeLoading, setCodeLoading] = useState(false);
+  const [codeHint, setCodeHint] = useState("");
   const [brandName, setBrandName] = useState("");
   const [name, setName] = useState("");
   const [model, setModel] = useState("");
@@ -69,6 +71,7 @@ export default function NewProductPage() {
   const [visualFeatures, setVisualFeatures] = useState("");
   const [productType, setProductType] = useState("");
   const [color, setColor] = useState("");
+  const [knownColors, setKnownColors] = useState<string[]>(COLORS);
   const [costPrice, setCostPrice] = useState("");
   const [salePrice, setSalePrice] = useState("");
   const [fabric, setFabric] = useState("");
@@ -99,7 +102,46 @@ export default function NewProductPage() {
     }
 
     loadStores();
+    (async () => {
+      const { data, error } = await supabase.from("product_variants").select("color").limit(10000);
+      if (!error && data) setKnownColors([...new Set([...COLORS, ...data.map(row => String(row.color || "").trim()).filter(Boolean)])]);
+    })();
   }, []);
+
+  useEffect(() => {
+    const design = designCode.trim().toUpperCase();
+    if (productType !== "بيجامة" || !/^[A-Z]$/.test(design)) {
+      setAgentCode("");
+      setCodeHint("");
+      return;
+    }
+    let canceled = false;
+    (async () => {
+      setCodeLoading(true);
+      setCodeHint("");
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) throw new Error("سجّل الدخول لقراءة الأكواد");
+        const response = await fetch("/api/agent/product-codes?next_design=" + encodeURIComponent(design), {
+          headers: { Authorization: `Bearer ${session.access_token}` }, cache: "no-store",
+        });
+        const result = await response.json();
+        if (!response.ok || !result.ok) throw new Error(result.error || "تعذر اقتراح الكود");
+        if (canceled) return;
+        setAgentCode(result.suggested_code);
+        if (result.existing_brand) {
+          setBrandName(result.existing_brand);
+          setCodeHint("هذا التصميم مسجل بالفعل؛ البراند محدد تلقائيًا.");
+        } else {
+          setBrandName("");
+          setCodeHint("تصميم جديد؛ اكتب اسم البراند.");
+        }
+      } catch (error) {
+        if (!canceled) { setAgentCode(""); setCodeHint(error instanceof Error ? error.message : "تعذر اقتراح الكود"); }
+      } finally { if (!canceled) setCodeLoading(false); }
+    })();
+    return () => { canceled = true; };
+  }, [designCode, productType]);
 
   function handleImageChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -130,6 +172,7 @@ export default function NewProductPage() {
     setDesignCode("");
     setAgentCode("");
     setBrandName("");
+    setCodeHint("");
     setName("");
     setModel("");
     setDescription("");
@@ -158,9 +201,9 @@ export default function NewProductPage() {
 
     const isPajama = productType === "بيجامة";
     const normalizedAgentCode = agentCode.trim().toUpperCase();
-    const effectiveDesignCode = isPajama ? normalizedAgentCode.charAt(0) : designCode.trim();
-    if (isPajama && (!/^[A-Z][0-9]{2,}$/.test(normalizedAgentCode) || !brandName.trim())) {
-      setMessage("للبيجامات يلزم كود Adora مثل D01 واسم البراند");
+    const effectiveDesignCode = designCode.trim().toUpperCase();
+    if (isPajama && (!/^[A-Z]$/.test(effectiveDesignCode) || !brandName.trim() || codeLoading || !agentCode)) {
+      setMessage("اختر حرف التصميم أولًا وانتظر ظهور الكود التلقائي، ثم اكتب اسم البراند");
       return;
     }
 
@@ -218,9 +261,6 @@ export default function NewProductPage() {
           .select("role,is_active").eq("id", user?.id || "").single();
         if (profile?.role !== "admin" || !profile.is_active) {
           throw new Error("إضافة البيجامات مع الأكواد تتطلب صلاحية المدير");
-        }
-        if ((result.codes || []).some((c: { code: string }) => c.code === normalizedAgentCode)) {
-          throw new Error("كود Adora مستخدم من قبل، اختر كودًا مختلفًا");
         }
         const conflictingDesign = (result.codes || []).find((c: { design_code: string; brand_name: string }) =>
           c.design_code === effectiveDesignCode &&
@@ -317,7 +357,7 @@ export default function NewProductPage() {
               Authorization: `Bearer ${session.access_token}`,
             },
             body: JSON.stringify({
-              code: normalizedAgentCode,
+              auto_code: true,
               design_code: effectiveDesignCode,
               brand_name: brandName.trim(),
               color_name: color,
@@ -329,6 +369,7 @@ export default function NewProductPage() {
           if (!response.ok || !codeResult.ok) {
             throw new Error(codeResult.error || "فشل تسجيل كود Adora");
           }
+          setAgentCode(codeResult.code.code);
         } catch (codeError) {
           setMessage(
             `تم حفظ المنتج والمقاسات بالفعل في ERP، لكن لم يُربط كود Adora (${normalizedAgentCode}). ` +
@@ -340,7 +381,7 @@ export default function NewProductPage() {
       }
 
       setMessage(isPajama
-        ? `تم حفظ المنتج والمقاسات وربط كود Adora ${normalizedAgentCode} بنجاح`
+        ? `تم حفظ المنتج والمقاسات وربط كود Adora بنجاح`
         : "تم حفظ المنتج وكل المقاسات في المخزون بنجاح");
       resetForm();
     } catch (error: any) {
@@ -379,6 +420,7 @@ export default function NewProductPage() {
       <form onSubmit={handleSubmit} className="grid max-w-6xl grid-cols-1 gap-6">
         <section className="rounded-2xl border border-neutral-800 bg-neutral-900 p-5">
           <h2 className="mb-4 text-xl font-bold">البيانات الأساسية</h2>
+          <p className="mb-4 text-sm text-neutral-400">اختر المتجر ونوع المنتج أولًا، ثم أدخل التصميم واللون. لا تحتاج إلى كتابة رقم الكود.</p>
 
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <label className="grid gap-2">
@@ -411,38 +453,31 @@ export default function NewProductPage() {
             {productType === "بيجامة" ? (
               <>
                 <label className="grid gap-2">
-                  <span className="text-sm text-neutral-300">كود Adora (التصميم واللون) *</span>
-                  <input className="rounded-xl bg-neutral-800 p-4" value={agentCode}
-                    onChange={(e) => setAgentCode(e.target.value.toUpperCase())}
-                    placeholder="مثل D01" required dir="ltr" maxLength={12} />
-                  <span className="text-xs text-neutral-500">حرف التصميم ثم رقم اللون؛ مثال D01</span>
+                  <span className="text-sm text-neutral-300">حرف التصميم *</span>
+                  <input className="rounded-xl bg-neutral-800 p-4 uppercase" dir="ltr"
+                    value={designCode} maxLength={1} required placeholder="D"
+                    onChange={(e) => setDesignCode(e.target.value.toUpperCase().replace(/[^A-Z]/g, "").slice(0, 1))} />
+                  <span className="text-xs text-neutral-400">مثال: D أو R أو V؛ كل حرف يعني تصميمًا مستقلًا.</span>
+                </label>
+                <label className="grid gap-2">
+                  <span className="text-sm text-neutral-300">كود البيجامة (تلقائي)</span>
+                  <input className="rounded-xl bg-neutral-800 p-4 text-neutral-300" disabled dir="ltr"
+                    value={codeLoading ? "..." : agentCode} placeholder="يظهر بعد اختيار حرف التصميم" />
+                  <span className="text-xs text-neutral-400">{codeHint || "الرقم يُحدد عند الحفظ، ولا يمكن تكراره."}</span>
                 </label>
                 <label className="grid gap-2">
                   <span className="text-sm text-neutral-300">اسم البراند *</span>
                   <input className="rounded-xl bg-neutral-800 p-4" value={brandName}
-                    onChange={(e) => setBrandName(e.target.value)}
-                    placeholder="Dior / Fendi / Victoria" required />
-                </label>
-                <label className="grid gap-2">
-                  <span className="text-sm text-neutral-300">كود التصميم (تلقائي)</span>
-                  <input className="rounded-xl bg-neutral-800 p-4 text-neutral-400"
-                    value={agentCode.trim().toUpperCase().charAt(0)} disabled dir="ltr" />
+                    onChange={(e) => setBrandName(e.target.value)} placeholder="Dior / Fendi / Victoria" required />
                 </label>
               </>
             ) : (
-            <label className="grid gap-2">
-              <span className="text-sm text-neutral-300">كود التصميم *</span>
-              <input
-                className="rounded-xl bg-neutral-800 p-4"
-                placeholder="مثال: LIENE-R-001"
-                value={designCode}
-                onChange={(e) => setDesignCode(e.target.value)}
-                required
-              />
-              <span className="text-xs text-neutral-500">
-                جميع ألوان نفس التصميم يجب أن تحمل نفس الكود.
-              </span>
-            </label>
+              <label className="grid gap-2">
+                <span className="text-sm text-neutral-300">كود التصميم *</span>
+                <input className="rounded-xl bg-neutral-800 p-4" value={designCode}
+                  onChange={(e) => setDesignCode(e.target.value)}
+                  placeholder="مثال LIENE-R-001" required />
+              </label>
             )}
 
             <label className="grid gap-2">
@@ -495,20 +530,14 @@ export default function NewProductPage() {
             </label>
 
             <label className="grid gap-2">
-              <span className="text-sm text-neutral-300">اللون *</span>
-              <select
-                className="rounded-xl bg-neutral-800 p-4"
-                value={color}
-                onChange={(e) => setColor(e.target.value)}
-                required
-              >
-                <option value="">اختر اللون</option>
-                {COLORS.map((c) => (
-                  <option key={c} value={c}>
-                    {c}
-                  </option>
-                ))}
-              </select>
+              <span className="text-sm text-neutral-300">اللون * — اختر أو اكتب لونًا جديدًا</span>
+              <input className="rounded-xl bg-neutral-800 p-4" list="adora-product-colors"
+                value={color} onChange={(e) => setColor(e.target.value)} required
+                placeholder="اختر من القائمة أو اكتب لونًا جديدًا" />
+              <datalist id="adora-product-colors">
+                {knownColors.map((c) => <option key={c} value={c} />)}
+              </datalist>
+              <span className="text-xs text-neutral-400">الألوان الجديدة تُحفظ مع المنتج والمقاسات، وتظهر لاحقًا في الاقتراحات.</span>
             </label>
           </div>
         </section>
