@@ -199,7 +199,7 @@ export default function NewProductPage() {
 
     setMessage("");
 
-    const isPajama = productType === "بيجامة";
+    const isPajama = true;
     const normalizedAgentCode = agentCode.trim().toUpperCase();
     const effectiveDesignCode = designCode.trim().toUpperCase();
     if (!/^[A-Z]$/.test(effectiveDesignCode) || !brandName.trim() || codeLoading || !agentCode) {
@@ -214,8 +214,7 @@ export default function NewProductPage() {
       !productType ||
       !color ||
       !fabric.trim() ||
-      (!isPajama && !description.trim()) ||
-      (!isPajama && !visualFeatures.trim()) ||
+
       !costPrice ||
       !salePrice ||
       !imageFile;
@@ -420,7 +419,7 @@ export default function NewProductPage() {
       <form onSubmit={handleSubmit} className="grid max-w-6xl grid-cols-1 gap-6">
         <section className="rounded-2xl border border-neutral-800 bg-neutral-900 p-5">
           <h2 className="mb-4 text-xl font-bold">البيانات الأساسية</h2>
-          <p className="mb-4 text-sm text-neutral-400">جميع الحقول ظاهرة من البداية: المتجر، حرف التصميم، الكود التلقائي، البراند، النوع، اللون وبقية البيانات. كود Adora يُربط حاليًا بجدول الأكواد عند حفظ البيجامة.</p>
+          <p className="mb-4 text-sm text-neutral-400">جميع الحقول ظاهرة من البداية. نفس النموذج يحفظ المنتج والمقاسات والمخزون ويربط الكود مع جدول الأكواد.</p>
 
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <label className="grid gap-2">
@@ -533,29 +532,29 @@ export default function NewProductPage() {
         <section className="rounded-2xl border border-neutral-800 bg-neutral-900 p-5">
           <h2 className="mb-2 text-xl font-bold">وصف ومواصفات المنتج</h2>
           <p className="mb-4 text-sm text-neutral-400">
-            يعتمد Agent البيجامات على الكود؛ الوصف والعلامات البصرية اختياريان للبيجامات.
+            الوصف والعلامات البصرية اختياريان لجميع المنتجات؛ الكود يحدد التصميم واللون.
           </p>
 
           <div className="grid gap-4">
             <label className="grid gap-2">
-              <span className="text-sm text-neutral-300">وصف المنتج {productType === "بيجامة" ? "(اختياري)" : "*"}</span>
+              <span className="text-sm text-neutral-300">وصف المنتج (اختياري)</span>
               <textarea
                 className="min-h-28 rounded-xl bg-neutral-800 p-4"
                 placeholder="مثال: بدلة لينو بقصة واسعة، ياقة V، رابطة جانبية، بدون أزرار ظاهرة، بنطال واسع"
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                required={productType !== "بيجامة"}
+                required={false}
               />
             </label>
 
             <label className="grid gap-2">
-              <span className="text-sm text-neutral-300">العلامات المميزة للـAI {productType === "بيجامة" ? "(اختياري)" : "*"}</span>
+              <span className="text-sm text-neutral-300">العلامات البصرية (اختياري)</span>
               <textarea
                 className="min-h-24 rounded-xl bg-neutral-800 p-4"
                 placeholder="مثال: ياقة V | رابطة جانبية | بدون أزرار | أكمام واسعة | بنطال واسع"
                 value={visualFeatures}
                 onChange={(e) => setVisualFeatures(e.target.value)}
-                required={productType !== "بيجامة"}
+                required={false}
               />
               <span className="text-xs text-neutral-500">
                 اكتب فقط العلامات البصرية التي تميز التصميم. لا تكرر اللون هنا.
