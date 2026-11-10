@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { getCurrentUserProfile } from "@/lib/auth";
 
+type Store = { id: string; name: string };
 type Product = {
   id: string;
   store_id: string;
@@ -44,6 +45,8 @@ export default function AgentProductCodesPage() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [products, setProducts] = useState<Product[]>([]);
+  const [stores, setStores] = useState<Store[]>([]);
+  const [storeFilter, setStoreFilter] = useState("");
   const [codes, setCodes] = useState<ProductCode[]>([]);
   const [search, setSearch] = useState("");
   const [form, setForm] = useState<Form>(emptyForm);
@@ -69,6 +72,7 @@ export default function AgentProductCodesPage() {
     const result = await api("GET");
     setProducts(result.products || []);
     setCodes(result.codes || []);
+    setStores(result.stores || []);
   }
 
   useEffect(() => {
@@ -90,6 +94,7 @@ export default function AgentProductCodesPage() {
         if (!active) return;
         setProducts(result.products || []);
         setCodes(result.codes || []);
+        setStores(result.stores || []);
       } catch (e) {
         if (active) setError(e instanceof Error ? e.message : "تعذر قراءة الأكواد");
       } finally {
@@ -105,18 +110,20 @@ export default function AgentProductCodesPage() {
   const suggestions = useMemo(() => {
     return products.filter((p) =>
       p.product_type === "بيجامة" &&
+      (!storeFilter || p.store_id === storeFilter) &&
       (p.id === form.product_id || !codes.some((c) => c.product_id === p.id))
     );
-  }, [products, codes, form.product_id]);
+  }, [products, codes, form.product_id, storeFilter]);
 
   const visible = useMemo(() => {
     const q = search.trim().toLocaleLowerCase();
     return codes.filter((c) => {
       const product = products.find((p) => p.id === c.product_id);
+      if (storeFilter && product?.store_id !== storeFilter) return false;
       return [c.code, c.design_code, c.brand_name, c.color_name, product?.name, product?.sku]
         .some((v) => String(v || "").toLocaleLowerCase().includes(q));
     });
-  }, [codes, products, search]);
+  }, [codes, products, search, storeFilter]);
 
   function selectProduct(id: string) {
     const product = products.find((p) => p.id === id);
@@ -128,6 +135,8 @@ export default function AgentProductCodesPage() {
   }
 
   function edit(code: ProductCode) {
+    const product = products.find((p) => p.id === code.product_id);
+    setStoreFilter(product?.store_id || "");
     setForm({
       id: code.id, code: code.code, brand_name: code.brand_name,
       color_name: code.color_name, product_id: code.product_id, is_active: code.is_active,
@@ -208,6 +217,13 @@ export default function AgentProductCodesPage() {
       <section className="mb-6 rounded-2xl border border-neutral-800 bg-neutral-900 p-5">
         <h2 className="mb-4 text-xl font-bold">{form.id ? "تعديل كود" : "إضافة كود جديد"}</h2>
         <div className="grid gap-4 md:grid-cols-2">
+          <label className="block text-sm">المتجر
+            <select className="mt-2 w-full rounded-xl bg-neutral-800 p-3" value={storeFilter}
+              onChange={(e) => { setStoreFilter(e.target.value); setForm(emptyForm); }}>
+              <option value="">اختر المتجر لعرض منتجاته</option>
+              {stores.map((store) => <option value={store.id} key={store.id}>{store.name}</option>)}
+            </select>
+          </label>
           <label className="block text-sm">كود المنتج (مثل D01)
             <input
               className="mt-2 w-full rounded-xl bg-neutral-800 p-3 uppercase"
@@ -271,7 +287,7 @@ export default function AgentProductCodesPage() {
 
       <section className="rounded-2xl border border-neutral-800 bg-neutral-900 p-5">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-          <h2 className="text-xl font-bold">الأكواد المسجلة ({codes.length})</h2>
+          <h2 className="text-xl font-bold">الأكواد المسجلة ({visible.length})</h2>
           <input className="rounded-xl bg-neutral-800 p-3" placeholder="بحث بالكود أو اللون أو البراند"
             value={search} onChange={(e) => setSearch(e.target.value)} />
         </div>
