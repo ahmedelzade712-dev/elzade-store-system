@@ -182,7 +182,7 @@ ON public.agent_product_codes (design_code, lower(btrim(color_name)));
 -- Read-only consistency check. Never inserts, updates, or deletes customer data.
 CREATE OR REPLACE FUNCTION public.erp_catalog_integrity_report()
 RETURNS jsonb LANGUAGE sql STABLE SECURITY INVOKER SET search_path = public, pg_temp
-AS $
+AS $catalog_audit$
   WITH code_checks AS (
     SELECT c.id, c.product_id, c.design_code, c.code, c.color_name, c.brand_name,
       p.id AS linked_id, p.store_id AS store_id, p.is_active AS product_active,
@@ -215,7 +215,7 @@ AS $
         AND NOT EXISTS (SELECT 1 FROM public.agent_product_codes c WHERE c.product_id=p.id)
     )
   );
-$;
+$catalog_audit$;
 
 REVOKE ALL ON FUNCTION public.erp_catalog_integrity_report() FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.erp_catalog_integrity_report() TO service_role;
