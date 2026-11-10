@@ -7,6 +7,9 @@ type Result = {
   ok?:boolean;passed?:boolean;store?:string;product_count?:number;
   linked_count?:number;checked_requests?:number;failed_checks?:number;
   failures?:string[];warning?:string|null;error?:string;
+  active_code_count?:number;
+  missing_products?:Array<{id:string;name:string;reason:string}>;
+  inactive_code_products?:Array<{id:string;name:string;code?:string;reason:string}>;
 };
 
 export default function CatalogLiveCheckPage() {
@@ -52,7 +55,19 @@ export default function CatalogLiveCheckPage() {
                 <h2 className={"text-xl font-bold "+(result.passed?"text-green-400":"text-red-300")}>
                   {result.passed?"اجتاز جميع الفحوصات":"توجد نتائج تحتاج مراجعة"}
                 </h2>
-                <p>المنتجات النشطة: {result.product_count} — الأكواد المرتبطة: {result.linked_count}</p>
+                <p>المنتجات النشطة: {result.product_count} — الأكواد المرتبطة: {result.linked_count} — الأكواد المفعّلة: {result.active_code_count}</p>
+                {(result.missing_products||[]).length>0 && (
+                  <div className="rounded-lg border border-red-500 p-3">
+                    <p className="font-bold text-red-300">منتجات بدون كود</p>
+                    {(result.missing_products||[]).map(p=><p key={p.id}>{p.name} — {p.id}</p>)}
+                  </div>
+                )}
+                {(result.inactive_code_products||[]).length>0 && (
+                  <div className="rounded-lg border border-yellow-500 p-3">
+                    <p className="font-bold text-yellow-300">منتجات مرتبطة بأكواد غير مفعّلة</p>
+                    {(result.inactive_code_products||[]).map(p=><p key={p.id}>{p.name} — {p.code}</p>)}
+                  </div>
+                )}
                 <p>طلبات البحث المفحوصة: {result.checked_requests} — الأخطاء: {result.failed_checks}</p>
                 {result.warning && <p className="text-yellow-300">{result.warning}</p>}
                 {(result.failures||[]).length>0 && (

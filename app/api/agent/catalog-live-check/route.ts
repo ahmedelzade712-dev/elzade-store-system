@@ -49,9 +49,23 @@ export async function GET(request:Request){
       return NextResponse.json({ok:false,error:"CATALOG_TOO_LARGE"},{status:413});
     const products=(rawProducts||[]) as ProductRow[];
     const byId=new Map(products.map(p=>[p.id,p]));
-    const codes=(rawCodes||[]).filter(c=>byId.has(c.product_id) && c.is_active===true) as CodeRow[];
+    const allLinkedCodes=(rawCodes||[]).filter(c=>byId.has(c.product_id)) as CodeRow[];
+    const codes=allLinkedCodes.filter(c=>c.is_active===true);
     const variants=(rawVariants||[]) as VariantRow[];
     const failures:string[]=[];
+    const missingProducts=products
+      .filter(p=>!allLinkedCodes.some(c=>c.product_id===p.id))
+      .map(p=>({id:p.id,name:p.name,reason:"MISSING_CODE"}));
+    const inactiveProducts=products
+      .filter(p=>allLinkedCodes.some(c=>c.product_id===p.id && c.is_active!==true))
+      .map(p=>({id:p.id,name:p.name,
+        code:allLinkedCodes.find(c=>c.product_id===p.id)?.code,reason:"CODE_INACTIVE"}));
+    for(const p of missingProducts) recordFailure(failures,p.name,"MISSING_CODE");
+    for(const p of inactiveProducts) recordFailure(failures,p.name,"CODE_INACTIVE");
+    if(codes.length!==products.length) recordFailure(
+      failures,"CATALOG_COMPLETENESS",
+      "Active codes "+codes.length+" of "+products.length+" active products"
+    );
     let checks=0;
     async function lookup(by:"code"|"design"|"brand"|"color",value:string){
       const u=new URL("https://internal.local/api/agent/catalog-query");
@@ -136,10 +150,11 @@ export async function GET(request:Request){
 
     return NextResponse.json({
       ok:true,passed:failures.length===0,store:store.name,
-      product_count:products.length,linked_count:codes.length,
+      product_count:products.length,linked_count:allLinkedCodes.length,
+      active_code_count:codes.length,
       checked_requests:checks,failed_checks:failures.length,
-      failures,
-      warning:codes.length!==products.length?"Some products lack catalog codes":null,
+      failures,missing_products:missingProducts,inactive_code_products:inactiveProducts,
+      warning:codes.length!==products.length?"Some products lack active catalog codes":null,
       read_only:true,
     },{headers:{"Cache-Control":"private, no-store"}});
   } catch(error){
