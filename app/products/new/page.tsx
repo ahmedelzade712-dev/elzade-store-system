@@ -424,6 +424,23 @@ export default function NewProductPage() {
 
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <label className="grid gap-2">
+              <span className="text-sm text-neutral-300">نوع المنتج *</span>
+              <select
+                className="rounded-xl bg-neutral-800 p-4"
+                value={productType}
+                onChange={(e) => setProductType(e.target.value)}
+                required
+              >
+                <option value="">اختر نوع المنتج</option>
+                {PRODUCT_TYPES.map((type) => (
+                  <option key={type} value={type}>
+                    {type}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="grid gap-2">
               <span className="text-sm text-neutral-300">المتجر *</span>
               <select
                 className="rounded-xl bg-neutral-800 p-4"
@@ -489,23 +506,6 @@ export default function NewProductPage() {
                 onChange={(e) => setName(e.target.value)}
                 required
               />
-            </label>
-
-            <label className="grid gap-2">
-              <span className="text-sm text-neutral-300">نوع المنتج *</span>
-              <select
-                className="rounded-xl bg-neutral-800 p-4"
-                value={productType}
-                onChange={(e) => setProductType(e.target.value)}
-                required
-              >
-                <option value="">اختر نوع المنتج</option>
-                {PRODUCT_TYPES.map((type) => (
-                  <option key={type} value={type}>
-                    {type}
-                  </option>
-                ))}
-              </select>
             </label>
 
             <label className="grid gap-2">
