@@ -304,10 +304,12 @@ export default function NewProductPage() {
         }}),
       });
       const result = await response.json();
-      if (!response.ok || !result.ok) throw new Error(
-        result.error === "CATALOG_MIGRATION_REQUIRED"
-          ? "يجب تركيب ترحيل قاعدة البيانات قبل حفظ المنتجات بالنظام الجديد"
-          : result.error || "فشل حفظ المنتج"
+      if (!response.ok || !result.ok) {
+        writeRejected = true;
+        throw new Error(
+          result.error === "CATALOG_MIGRATION_REQUIRED"
+            ? "يجب تركيب ترحيل قاعدة البيانات قبل حفظ المنتجات بالنظام الجديد"
+            : result.error || "فشل حفظ المنتج"
         );
       }
       setMessage(`تم حفظ المنتج والمقاسات والكود ${result.code} معًا بنجاح`);
