@@ -39,7 +39,7 @@ export async function GET(request: Request) {
     // First filter by catalog identity; no pictures, secret costs or unrelated stores are exposed.
     let catalogQuery = supabaseAdmin.from("agent_product_codes")
       .select("product_id,code,design_code,brand_name,color_name,is_active")
-      .eq("is_active",true).limit(1000);
+      .eq("is_active",true).limit(1001);
     if (by === "code") catalogQuery = catalogQuery.eq("code",value.toUpperCase());
     if (by === "design") catalogQuery = catalogQuery.eq("design_code",value.toUpperCase());
     if (by === "brand") catalogQuery = catalogQuery.ilike("brand_name",value);
@@ -47,6 +47,9 @@ export async function GET(request: Request) {
     const {data:codes,error:codesError} = await catalogQuery;
     if (codesError) throw codesError;
     if (!codes?.length) return NextResponse.json({ok:true,store_id:storeId,products:[]});
+    if (codes.length > 1000) {
+      return NextResponse.json({ok:false,error:"TOO_MANY_CATALOG_MATCHES"},{status:413});
+    }
     const ids=codes.map(c=>c.product_id);
 
     const [{data:products,error:productError},{data:variants,error:variantError}] = await Promise.all([
@@ -55,10 +58,11 @@ export async function GET(request: Request) {
         .eq("store_id",storeId).eq("is_active",true).in("id",ids).limit(1000),
       supabaseAdmin.from("product_variants")
         .select("product_id,color,size,sale_price,stock_quantity,is_active,image_url")
-        .eq("store_id",storeId).in("product_id",ids).limit(10000),
+        .eq("store_id",storeId).in("product_id",ids).limit(10001),
     ]);
     if (productError) throw productError;
     if (variantError) throw variantError;
+    if ((variants || []).length > 10000) return NextResponse.json({ok:false,error:"TOO_MANY_VARIANTS"},{status:413});
     const productById = new Map((products||[]).map(p=>[p.id,p]));
     const variantsById = new Map<string,typeof variants>();
     for(const row of variants||[]) {
