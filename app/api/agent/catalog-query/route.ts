@@ -59,7 +59,7 @@ export async function GET(request: Request) {
     let suggestions: string[]=[];
     let codes=allCodes||[];
     if(by==="code" || by==="design"){
-      const candidate=normalizeCatalogText(value).replace(/\\s/g,"").toUpperCase();
+      const candidate=normalizeCatalogText(value).replace(/\s/g,"").toUpperCase();
       // Never typo-correct short product codes: a wrong code means a different product.
       if(by==="code" && !/^[A-Z][0-9]{2,}$/.test(candidate))
         return NextResponse.json({ok:true,store_id:storeId,by,value,match_status:"not_found",products:[]});
