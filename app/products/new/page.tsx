@@ -110,7 +110,7 @@ export default function NewProductPage() {
 
   useEffect(() => {
     const design = designCode.trim().toUpperCase();
-    if (productType !== "بيجامة" || !/^[A-Z]$/.test(design)) {
+    if (!/^[A-Z]$/.test(design)) {
       setAgentCode("");
       setCodeHint("");
       return;
@@ -141,7 +141,7 @@ export default function NewProductPage() {
       } finally { if (!canceled) setCodeLoading(false); }
     })();
     return () => { canceled = true; };
-  }, [designCode, productType]);
+  }, [designCode]);
 
   function handleImageChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -199,10 +199,10 @@ export default function NewProductPage() {
 
     setMessage("");
 
-    const isPajama = productType === "بيجامة";
+    const isPajama = true;
     const normalizedAgentCode = agentCode.trim().toUpperCase();
     const effectiveDesignCode = designCode.trim().toUpperCase();
-    if (isPajama && (!/^[A-Z]$/.test(effectiveDesignCode) || !brandName.trim() || codeLoading || !agentCode)) {
+    if (!/^[A-Z]$/.test(effectiveDesignCode) || !brandName.trim() || codeLoading || !agentCode) {
       setMessage("اختر حرف التصميم أولًا وانتظر ظهور الكود التلقائي، ثم اكتب اسم البراند");
       return;
     }
@@ -214,8 +214,7 @@ export default function NewProductPage() {
       !productType ||
       !color ||
       !fabric.trim() ||
-      (!isPajama && !description.trim()) ||
-      (!isPajama && !visualFeatures.trim()) ||
+
       !costPrice ||
       !salePrice ||
       !imageFile;
@@ -420,7 +419,7 @@ export default function NewProductPage() {
       <form onSubmit={handleSubmit} className="grid max-w-6xl grid-cols-1 gap-6">
         <section className="rounded-2xl border border-neutral-800 bg-neutral-900 p-5">
           <h2 className="mb-4 text-xl font-bold">البيانات الأساسية</h2>
-          <p className="mb-4 text-sm text-neutral-400">اختر المتجر ونوع المنتج أولًا، ثم أدخل التصميم واللون. لا تحتاج إلى كتابة رقم الكود.</p>
+          <p className="mb-4 text-sm text-neutral-400">جميع الحقول ظاهرة من البداية. نفس النموذج يحفظ المنتج والمقاسات والمخزون ويربط الكود مع جدول الأكواد.</p>
 
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <label className="grid gap-2">
@@ -467,36 +466,24 @@ export default function NewProductPage() {
               />
             </label>
 
-            {productType === "بيجامة" ? (
-              <>
-                <label className="grid gap-2">
-                  <span className="text-sm text-neutral-300">حرف التصميم *</span>
-                  <input className="rounded-xl bg-neutral-800 p-4 uppercase" dir="ltr"
-                    value={designCode} maxLength={1} required placeholder="D"
-                    onChange={(e) => setDesignCode(e.target.value.toUpperCase().replace(/[^A-Z]/g, "").slice(0, 1))} />
-                  <span className="text-xs text-neutral-400">مثال: D أو R أو V؛ كل حرف يعني تصميمًا مستقلًا.</span>
-                </label>
-                <label className="grid gap-2">
-                  <span className="text-sm text-neutral-300">كود البيجامة (تلقائي)</span>
-                  <input className="rounded-xl bg-neutral-800 p-4 text-neutral-300" disabled dir="ltr"
-                    value={codeLoading ? "..." : agentCode} placeholder="يظهر بعد اختيار حرف التصميم" />
-                  <span className="text-xs text-neutral-400">{codeHint || "الرقم يُحدد عند الحفظ، ولا يمكن تكراره."}</span>
-                </label>
-                <label className="grid gap-2">
-                  <span className="text-sm text-neutral-300">اسم البراند *</span>
-                  <input className="rounded-xl bg-neutral-800 p-4" value={brandName}
-                    onChange={(e) => setBrandName(e.target.value)} placeholder="Dior / Fendi / Victoria" required />
-                </label>
-              </>
-            ) : (
-              <label className="grid gap-2">
-                <span className="text-sm text-neutral-300">كود التصميم *</span>
-                <input className="rounded-xl bg-neutral-800 p-4" value={designCode}
-                  onChange={(e) => setDesignCode(e.target.value)}
-                  placeholder="مثال LIENE-R-001" required />
-              </label>
-            )}
-
+            <label className="grid gap-2">
+              <span className="text-sm text-neutral-300">حرف التصميم *</span>
+              <input className="rounded-xl bg-neutral-800 p-4 uppercase" dir="ltr"
+                value={designCode} maxLength={1} required placeholder="D"
+                onChange={(e) => setDesignCode(e.target.value.toUpperCase().replace(/[^A-Z]/g, "").slice(0, 1))} />
+              <span className="text-xs text-neutral-400">اكتب حرف التصميم مباشرة دون الحاجة لاختيار نوع المنتج.</span>
+            </label>
+            <label className="grid gap-2">
+              <span className="text-sm text-neutral-300">كود المنتج المقترح تلقائيًا</span>
+              <input className="rounded-xl bg-neutral-800 p-4 text-neutral-300" disabled dir="ltr"
+                value={codeLoading ? "..." : agentCode} placeholder="يظهر عند كتابة حرف التصميم" />
+              <span className="text-xs text-neutral-400">{codeHint || "الرقم النهائي يثبت عند الحفظ؛ يمنع تكرار الكود."}</span>
+            </label>
+            <label className="grid gap-2">
+              <span className="text-sm text-neutral-300">اسم البراند *</span>
+              <input className="rounded-xl bg-neutral-800 p-4" value={brandName}
+                onChange={(e) => setBrandName(e.target.value)} placeholder="Dior / Fendi / Victoria" required />
+            </label>
             <label className="grid gap-2">
               <span className="text-sm text-neutral-300">اسم المنتج *</span>
               <input
@@ -545,29 +532,29 @@ export default function NewProductPage() {
         <section className="rounded-2xl border border-neutral-800 bg-neutral-900 p-5">
           <h2 className="mb-2 text-xl font-bold">وصف ومواصفات المنتج</h2>
           <p className="mb-4 text-sm text-neutral-400">
-            يعتمد Agent البيجامات على الكود؛ الوصف والعلامات البصرية اختياريان للبيجامات.
+            الوصف والعلامات البصرية اختياريان لجميع المنتجات؛ الكود يحدد التصميم واللون.
           </p>
 
           <div className="grid gap-4">
             <label className="grid gap-2">
-              <span className="text-sm text-neutral-300">وصف المنتج {productType === "بيجامة" ? "(اختياري)" : "*"}</span>
+              <span className="text-sm text-neutral-300">وصف المنتج (اختياري)</span>
               <textarea
                 className="min-h-28 rounded-xl bg-neutral-800 p-4"
                 placeholder="مثال: بدلة لينو بقصة واسعة، ياقة V، رابطة جانبية، بدون أزرار ظاهرة، بنطال واسع"
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                required={productType !== "بيجامة"}
+                required={false}
               />
             </label>
 
             <label className="grid gap-2">
-              <span className="text-sm text-neutral-300">العلامات المميزة للـAI {productType === "بيجامة" ? "(اختياري)" : "*"}</span>
+              <span className="text-sm text-neutral-300">العلامات البصرية (اختياري)</span>
               <textarea
                 className="min-h-24 rounded-xl bg-neutral-800 p-4"
                 placeholder="مثال: ياقة V | رابطة جانبية | بدون أزرار | أكمام واسعة | بنطال واسع"
                 value={visualFeatures}
                 onChange={(e) => setVisualFeatures(e.target.value)}
-                required={productType !== "بيجامة"}
+                required={false}
               />
               <span className="text-xs text-neutral-500">
                 اكتب فقط العلامات البصرية التي تميز التصميم. لا تكرر اللون هنا.
