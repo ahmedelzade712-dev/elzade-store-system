@@ -274,125 +274,53 @@ export default function NewProductPage() {
     }
 
     const finalSku = sku.trim() || `PRD-${Date.now()}`;
-    let imageUrl = "";
     let uploadedFileName = "";
-    let createdProductId = "";
-
+    let writeAttempted = false;
+    let writeRejected = false;
     try {
       const fileExt = imageFile.name.split(".").pop()?.toLowerCase() || "jpg";
       uploadedFileName = `${Date.now()}-${finalSku}.${fileExt}`;
-
       const { error: uploadError } = await supabase.storage
         .from("product-images")
-        .upload(uploadedFileName, imageFile, {
-          cacheControl: "3600",
-          upsert: false,
-        });
+        .upload(uploadedFileName, imageFile, { cacheControl:"3600", upsert:false });
+      if (uploadError) throw new Error("خطأ في رفع الصورة: " + uploadError.message);
+      const imageUrl = supabase.storage.from("product-images")
+        .getPublicUrl(uploadedFileName).data.publicUrl;
 
-      if (uploadError) {
-        throw new Error("خطأ في رفع الصورة: " + uploadError.message);
+      const {data:{session}} = await supabase.auth.getSession();
+      if (!session) throw new Error("انتهت جلسة تسجيل الدخول");
+      writeAttempted = true;
+      const response = await fetch("/api/agent/catalog-write", {
+        method:"POST",
+        headers: { Authorization:`Bearer ${session.access_token}`, "Content-Type":"application/json" },
+        body:JSON.stringify({action:"create",product:{
+          store_id:storeId,sku:finalSku,design_code:effectiveDesignCode,
+          brand_name:brandName.trim(),color:color.trim(),
+          name:name.trim(),model:model.trim(),description:description.trim(),
+          visual_features:visualFeatures.trim(),product_type:productType,
+          fabric:fabric.trim(),image_url:imageUrl,cost_price:numericCostPrice,
+          sale_price:numericSalePrice,
+          sizes:selectedSizeRows.map(row=>({size:row.size,quantity:Number(row.quantity)})),
+        }}),
+      });
+      const result = await response.json();
+      if (!response.ok || !result.ok) {
+        writeRejected = true;
+        throw new Error(
+          result.error === "CATALOG_MIGRATION_REQUIRED"
+            ? "يجب تركيب ترحيل قاعدة البيانات قبل حفظ المنتجات بالنظام الجديد"
+            : result.error || "فشل حفظ المنتج"
+        );
       }
-
-      const { data: publicUrlData } = supabase.storage
-        .from("product-images")
-        .getPublicUrl(uploadedFileName);
-
-      imageUrl = publicUrlData.publicUrl;
-
-      const { data: product, error: productError } = await supabase
-        .from("products")
-        .insert({
-          store_id: storeId,
-          sku: finalSku,
-          design_code: effectiveDesignCode,
-          name: name.trim(),
-          model: model.trim() || null,
-          description: description.trim(),
-          visual_features: visualFeatures.trim(),
-          product_type: productType,
-          fabric: fabric.trim(),
-          main_image_url: imageUrl,
-          default_cost_price: numericCostPrice,
-          default_sale_price: numericSalePrice,
-          is_active: true,
-        })
-        .select("id")
-        .single();
-
-      if (productError || !product) {
-        throw new Error("خطأ في حفظ المنتج: " + (productError?.message || "خطأ غير معروف"));
-      }
-
-      createdProductId = product.id;
-
-      const variantsToInsert = selectedSizeRows.map((row) => ({
-        store_id: storeId,
-        product_id: product.id,
-        color,
-        size: row.size,
-        stock_quantity: Number(row.quantity),
-        cost_price: numericCostPrice,
-        sale_price: numericSalePrice,
-        image_url: imageUrl,
-        is_active: true,
-      }));
-
-      const { error: variantError } = await supabase
-        .from("product_variants")
-        .insert(variantsToInsert);
-
-      if (variantError) {
-        throw new Error("خطأ في حفظ المقاسات: " + variantError.message);
-      }
-
-      if (isPajama) {
-        try {
-          const { data: { session } } = await supabase.auth.getSession();
-          if (!session) throw new Error("انتهت جلسة تسجيل الدخول");
-          const response = await fetch("/api/agent/product-codes", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${session.access_token}`,
-            },
-            body: JSON.stringify({
-              auto_code: true,
-              design_code: effectiveDesignCode,
-              brand_name: brandName.trim(),
-              color_name: color,
-              product_id: product.id,
-              is_active: true,
-            }),
-          });
-          const codeResult = await response.json();
-          if (!response.ok || !codeResult.ok) {
-            throw new Error(codeResult.error || "فشل تسجيل كود Adora");
-          }
-          setAgentCode(codeResult.code.code);
-        } catch (codeError) {
-          setMessage(
-            `تم حفظ المنتج والمقاسات بالفعل في ERP، لكن لم يُربط كود Adora (${normalizedAgentCode}). ` +
-            "لا تُعد إنشاء المنتج. افتح صفحة المنتجات ثم اضغط تعديل على المنتج الموجود لإكمال ربط الكود. السبب: " +
-            (codeError instanceof Error ? codeError.message : "خطأ غير معروف")
-          );
-          return;
-        }
-      }
-
-      setMessage(isPajama
-        ? `تم حفظ المنتج والمقاسات وربط كود Adora بنجاح`
-        : "تم حفظ المنتج وكل المقاسات في المخزون بنجاح");
+      setMessage(`تم حفظ المنتج والمقاسات والكود ${result.code} معًا بنجاح`);
       resetForm();
-    } catch (error: any) {
-      if (createdProductId) {
-        await supabase.from("products").delete().eq("id", createdProductId);
-      }
-
-      if (uploadedFileName) {
+      uploadedFileName = "";
+    } catch(error) {
+      // Do not delete the image after an ambiguous network failure: the DB may have committed.
+      if (uploadedFileName && (!writeAttempted || writeRejected)) {
         await supabase.storage.from("product-images").remove([uploadedFileName]);
       }
-
-      setMessage(error?.message || "حدث خطأ أثناء حفظ المنتج");
+      setMessage(error instanceof Error ? error.message : "تعذر حفظ المنتج");
     } finally {
       setSaving(false);
     }

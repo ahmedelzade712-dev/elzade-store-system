@@ -94,94 +94,11 @@ export async function GET(request: Request) {
   } catch (error) { return errorResponse(error); }
 }
 
-async function save(request: Request, update: boolean) {
-  try {
-    await requireUser(request, true);
-    const body = await request.json();
-    const id = String(body.id || "").trim();
-    let code = String(body.code || "").trim().toUpperCase();
-    const autoCode = !update && body.auto_code === true;
-    const designCode = String(body.design_code || "").trim().toUpperCase();
-    const brandName = String(body.brand_name || "").trim();
-    const colorName = String(body.color_name || "").trim();
-    const productId = String(body.product_id || "").trim();
-    const isActive = body.is_active !== false;
-    if (update && !id) throw new Error("بيانات السجل غير مكتملة");
-    if (autoCode) {
-      if (!/^[A-Z]$/.test(designCode)) throw new Error("التصميم يجب أن يكون حرفًا واحدًا");
-    } else if (!/^[A-Z][0-9]{2,}$/.test(code)) {
-      throw new Error("الكود يجب أن يكون مثل D01 أو R02");
-    }
-    if (!/^[A-Z]$/.test(designCode) || (!autoCode && code[0] !== designCode)) {
-      throw new Error("التصميم يجب أن يطابق الحرف الأول في الكود");
-    }
-    if (!brandName || !colorName || !productId) throw new Error("بيانات البراند واللون والمنتج مطلوبة");
-
-    const { data: product, error: productError } = await supabaseAdmin
-      .from("products").select("id,store_id,product_type").eq("id", productId).single();
-    if (productError || !product) throw new Error("المنتج غير موجود في ERP");
-    // Product codes work across all product types and stores.
-
-    const { data: variants, error: variantsError } = await supabaseAdmin
-      .from("product_variants").select("color,store_id").eq("product_id", productId);
-    if (variantsError) throw variantsError;
-    const colors = [...new Set((variants || []).map(v => String(v.color || "").trim()).filter(Boolean))];
-    if (colors.length !== 1) throw new Error("المنتج يجب أن يحتوي على لون واحد فقط في المخزون");
-    if (colors[0] !== colorName) throw new Error("اللون يجب أن يطابق لون المنتج في المخزون");
-    if ((variants || []).some(v => v.store_id !== product.store_id)) {
-      throw new Error("المنتج ومقاساته ليست في المخزن نفسه");
-    }
-
-    const { data: sameDesign, error: designError } = await supabaseAdmin
-      .from("agent_product_codes").select("id,brand_name").eq("design_code", designCode);
-    if (designError) throw designError;
-    if ((sameDesign || []).some(row =>
-      row.id !== id && row.brand_name.trim().toLocaleLowerCase() !== brandName.toLocaleLowerCase())) {
-      throw new Error("التصميم مستخدم بالفعل مع براند مختلف");
-    }
-    const { data: sameColor, error: colorError } = await supabaseAdmin
-      .from("agent_product_codes")
-      .select("id,color_name,product_id").eq("design_code", designCode);
-    if (colorError) throw colorError;
-    if ((sameColor || []).some(row =>
-      row.id !== id && row.color_name.trim().toLocaleLowerCase() === colorName.toLocaleLowerCase()
-    )) throw new Error("هذا اللون مسجل بالفعل للتصميم نفسه");
-
-    if (autoCode) {
-      // The unique code index is the final concurrency guard. Retry after a collision.
-      for (let attempt = 0; attempt < 8; attempt++) {
-        const { data: used, error: usedError } = await supabaseAdmin
-          .from("agent_product_codes").select("code")
-          .eq("design_code", designCode).limit(10000);
-        if (usedError) throw usedError;
-        code = nextDesignCode((used || []).map(row => row.code), designCode);
-        const { data, error } = await supabaseAdmin.from("agent_product_codes").insert({
-          code, design_code: designCode, brand_name: brandName,
-          color_name: colorName, product_id: productId, is_active: isActive,
-        }).select("id,code").single();
-        if (!error) return NextResponse.json({ ok: true, code: data });
-        if (error.code !== "23505") throw error;
-        // A different constraint might have failed: check for an existing code on this product.
-        const { data: linked, error: linkedError } = await supabaseAdmin
-          .from("agent_product_codes").select("code").eq("product_id", productId).maybeSingle();
-        if (linkedError) throw linkedError;
-        if (linked) throw new Error("المنتج مرتبط بالفعل بالكود " + linked.code);
-      }
-      throw new Error("تعذر تخصيص رقم للكود بسبب طلبات متزامنة، أعد المحاولة");
-    }
-    const payload = {
-      code, design_code: designCode, brand_name: brandName,
-      color_name: colorName, product_id: productId, is_active: isActive,
-    };
-    const query = update
-      ? supabaseAdmin.from("agent_product_codes").update(payload).eq("id", id)
-      : supabaseAdmin.from("agent_product_codes").insert(payload);
-    const { data, error } = await query.select("id,code").single();
-    if (error?.code === "23505") throw new Error("الكود مستخدم أو المنتج مرتبط بكود آخر");
-    if (error) throw error;
-    return NextResponse.json({ ok: true, code: data });
-  } catch (error) { return errorResponse(error); }
+// Code rows are maintained only by the atomic catalog-write endpoint.
+// Never allow a second nontransactional write path for the same catalog entries.
+export async function POST() {
+  return NextResponse.json({ok:false,error:"USE_CATALOG_WRITE"},{status:405});
 }
-
-export async function POST(request: Request) { return save(request, false); }
-export async function PATCH(request: Request) { return save(request, true); }
+export async function PATCH() {
+  return NextResponse.json({ok:false,error:"USE_CATALOG_WRITE"},{status:405});
+}
