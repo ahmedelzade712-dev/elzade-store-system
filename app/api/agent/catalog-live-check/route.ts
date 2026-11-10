@@ -34,14 +34,15 @@ export async function GET(request:Request){
     if(storesError)throw storesError;
     const store=stores?.find(s=>s.name.trim().toLocaleLowerCase()===storeName.trim().toLocaleLowerCase());
     if(!store)return NextResponse.json({ok:false,error:"STORE_NOT_FOUND"},{status:404});
+    const storeId:string=store.id;
     const [{data:rawProducts,error:productError},{data:rawCodes,error:codeError},{data:rawVariants,error:variantError}]=await Promise.all([
       supabaseAdmin.from("products").select("id,store_id,name,main_image_url,is_active")
-        .eq("store_id",store.id).eq("is_active",true).limit(1001),
+        .eq("store_id",storeId).eq("is_active",true).limit(1001),
       supabaseAdmin.from("agent_product_codes")
         .select("product_id,code,design_code,brand_name,color_name,is_active").limit(1001),
       supabaseAdmin.from("product_variants")
         .select("product_id,size,color,sale_price,stock_quantity,is_active,image_url")
-        .eq("store_id",store.id).limit(10001),
+        .eq("store_id",storeId).limit(10001),
     ]);
     if(productError||codeError||variantError)throw productError||codeError||variantError;
     if((rawProducts||[]).length>1000||(rawCodes||[]).length>1000||(rawVariants||[]).length>10000)
@@ -54,7 +55,7 @@ export async function GET(request:Request){
     let checks=0;
     async function lookup(by:"code"|"design"|"brand"|"color",value:string){
       const u=new URL("https://internal.local/api/agent/catalog-query");
-      u.searchParams.set("store_id",store.id);
+      u.searchParams.set("store_id",storeId);
       u.searchParams.set("by",by);
       u.searchParams.set("value",value);
       const response=await catalogQuery(new Request(u,{headers:{Authorization:"Bearer "+token}}));
