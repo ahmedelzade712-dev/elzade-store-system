@@ -34,7 +34,8 @@ export async function GET(request:Request){
     if(storesError)throw storesError;
     const store=stores?.find(s=>s.name.trim().toLocaleLowerCase()===storeName.trim().toLocaleLowerCase());
     if(!store)return NextResponse.json({ok:false,error:"STORE_NOT_FOUND"},{status:404});
-    const storeId:string=store.id;
+    const storeId:string=verifiedStoreId;
+    const verifiedStoreId=store.id;
     const [{data:rawProducts,error:productError},{data:rawCodes,error:codeError},{data:rawVariants,error:variantError}]=await Promise.all([
       supabaseAdmin.from("products").select("id,store_id,name,main_image_url,is_active")
         .eq("store_id",storeId).eq("is_active",true).limit(1001),
