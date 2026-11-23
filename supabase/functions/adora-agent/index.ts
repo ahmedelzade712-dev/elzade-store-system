@@ -6,7 +6,6 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import { ADORA_AGENT_POLICY, ADORA_POLICY_VERSION } from "../_shared/adoraAgentPolicy.ts";
 import { SHIPPING_AREAS } from "../_shared/adoraShippingRates.ts";
 import { deliveryWindow, tripoliLocalHour } from "../_shared/adoraDeliveryPolicy.ts";
-import { calculateAdoraOrderQuote } from "../_shared/adoraDiscountRules.ts";
 
 const env=(k:string)=>Deno.env.get(k)?.trim()??"";
 const dbUrl=env("SUPABASE_URL");
@@ -81,9 +80,9 @@ async function modelDecision(history:Msg[],summary:string){
  const delivery=city?deliveryWindow(
     /بنغازي/.test(latest.message_text)?"بنغازي":
     /مصرات/.test(latest.message_text)?"مصراتة":"طرابلس",localHour):null;
- const customerHistory=history.slice(-24).map(m=>({
+ const customerHistory=history.slice(-16).map(m=>({
    at:m.received_at,
-   text:m.message_text.slice(0,1200),
+   text:m.message_text.slice(0,700),
    has_attachment:Array.isArray(m.attachment_refs)&&m.attachment_refs.length>0,
    kind:m.event_kind
  }));
@@ -144,8 +143,8 @@ async function status(event:string,sender:string,from:string,to:string){
 async function deliver(sender:string,message:string){
  if(!metaToken)throw Error("META_TOKEN_MISSING");
  const res=await fetch("https://graph.facebook.com/v26.0/me/messages",{
-  method:"POST",headers:{"content-type":"application/json"},
-  body:JSON.stringify({access_token:metaToken,recipient:{id:sender},
+  method:"POST",headers:{"content-type":"application/json","authorization":"Bearer "+metaToken},
+  body:JSON.stringify({recipient:{id:sender},
    messaging_type:"RESPONSE",message:{text:message.slice(0,600)}}),
   signal:AbortSignal.timeout(15000)
  });
